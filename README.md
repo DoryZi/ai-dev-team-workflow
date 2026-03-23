@@ -30,8 +30,8 @@ This triggers the full TDD cycle and you can watch the agents work:
 ├────────┬──────────┬──────────────┬──────────────┤
 │  Plan  │  Tests   │    Code      │   Review     │
 │        │          │              │              │
-│  sde   │ test-eng │    sde       │ code-reviewer│
-│ agent  │  agent   │   agent      │    agent     │
+│  sde   │ test-eng │    sde       │   /review    │
+│ agent  │  agent   │   agent      │   + ruff     │
 ├────────┴──────────┴──────────────┴──────────────┤
 │              /run-tests                          │
 │         (discovers & runs pytest)                │
@@ -79,7 +79,6 @@ ai-dev-team-workflow/
 │   └── python-coding.md       ← coding standards (agents reference this)
 ├── ai-code-review-demo/       ← git submodule (provides /review skill)
 ├── CLAUDE.md                  ← project rules & code boundaries
-├── sync-from-source.sh        ← sync agents/skills from source repo
 └── README.md
 ```
 
@@ -105,14 +104,12 @@ The `task_tracker/` app is a simple CLI task manager that supports add, list, an
 
 The agents and skills work with any uv-managed Python project directory.
 
-## Syncing from Source
+## Part of AI Will Replace You
 
-This repo's agents, skills, and conventions are synced from [ai_will_replace_you](https://github.com/DoryZi/ai_will_replace_you). To pull updates:
+This repo is part of the experiments I run on [doryzidon.com](https://doryzidon.com) exploring AI workflows and orchestrations for software engineering.
 
-```bash
-./sync-from-source.sh            # copy latest files
-./sync-from-source.sh --dry-run  # preview what would change
-```
+- Blog post: *coming soon*
+- YouTube walkthrough: *coming soon*
 
 ## License
 

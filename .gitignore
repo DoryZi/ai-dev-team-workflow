@@ -29,3 +29,6 @@ Thumbs.db
 
 # App data
 tasks.json
+
+# Internal sync tool (not part of the template)
+sync-from-source.sh
