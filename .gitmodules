@@ -1,0 +1,3 @@
+[submodule "ai-code-review-demo"]
+	path = ai-code-review-demo
+	url = https://github.com/DoryZi/ai-code-review-demo.git
