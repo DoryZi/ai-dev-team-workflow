@@ -55,7 +55,7 @@ Agents are defined in `.claude/agents/` and enforce strict boundaries: sde never
 | `/dev-fast` | Code-first: plan → code → tests → test loop → review |
 | `/run-tests` | Discover and run pytest across all project directories |
 | `/python-reviewer` | Static analysis + code review on changes |
-| `/review` | AI code review on working tree diff |
+| `/review` | AI code review on working tree diff (lives in `ai-code-review-demo/`) |
 
 ## Project Structure
 
@@ -73,11 +73,10 @@ ai-dev-team-workflow/
 │       ├── dev-tdd/
 │       ├── dev-fast/
 │       ├── run-tests/
-│       ├── python-reviewer/
-│       └── review/
+│       └── python-reviewer/
 ├── conventions/
 │   └── python-coding.md       ← coding standards (agents reference this)
-├── ai-code-review-demo/       ← git submodule (provides /review skill)
+├── ai-code-review-demo/       ← git submodule (has its own /review skill)
 ├── CLAUDE.md                  ← project rules & code boundaries
 └── README.md
 ```
@@ -94,7 +93,7 @@ The `task_tracker/` app is a simple CLI task manager that supports add, list, an
 | `/dev-fast task_tracker "Add task priority support"` | Code-first workflow |
 | `/run-tests task_tracker` | Run tests for task_tracker |
 | `/python-reviewer` | Review uncommitted changes |
-| `/review` | AI code review on diff |
+| `/review` | AI code review on diff (in `ai-code-review-demo/`) |
 
 ## Adapting for Your Project
 
