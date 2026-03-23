@@ -1,7 +1,6 @@
 """Simple CLI task tracker backed by a JSON file.
 
-Supports adding, listing, and completing tasks.
-Delete feature intentionally omitted — that's the demo task for /dev-tdd.
+Supports adding, listing, completing, and deleting tasks.
 """
 
 import argparse
@@ -121,7 +120,27 @@ def complete_task(task_id: int, store: Path = DEFAULT_STORE) -> dict:
     raise KeyError(f"Task {task_id} not found")
 
 
-# NOTE: delete_task intentionally not implemented — demo task for /dev-tdd
+def delete_task(task_id: int, store: Path = DEFAULT_STORE) -> dict:
+    """Delete a task by ID.
+
+    Args:
+        task_id: ID of the task to delete.
+        store: Path to the JSON file.
+
+    Returns:
+        The deleted task dictionary.
+
+    Raises:
+        KeyError: If no task with the given ID exists.
+    """
+    tasks = load_tasks(store)
+    for i, task in enumerate(tasks):
+        if task["id"] == task_id:
+            deleted = tasks.pop(i)
+            save_tasks(tasks, store)
+            logger.info("Deleted task", extra={"id": task_id})
+            return deleted
+    raise KeyError(f"Task {task_id} not found")
 
 
 def main() -> None:
@@ -137,6 +156,9 @@ def main() -> None:
 
     done_parser = sub.add_parser("done", help="Mark a task as done")
     done_parser.add_argument("id", type=int, help="Task ID")
+
+    delete_parser = sub.add_parser("delete", help="Delete a task")
+    delete_parser.add_argument("id", type=int, help="Task ID")
 
     args = parser.parse_args()
 
@@ -158,6 +180,14 @@ def main() -> None:
         try:
             task = complete_task(args.id)
             print(f"Done: [{task['id']}] {task['title']}")
+        except KeyError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(1)
+
+    elif args.command == "delete":
+        try:
+            task = delete_task(args.id)
+            print(f"Deleted: [{task['id']}] {task['title']}")
         except KeyError as e:
             print(str(e), file=sys.stderr)
             sys.exit(1)
