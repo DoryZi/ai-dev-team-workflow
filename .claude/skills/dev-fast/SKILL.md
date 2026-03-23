@@ -12,8 +12,7 @@ Fast development cycle: plan the feature, write code, then write tests to verify
 
 ```
 /dev-fast <task description>
-/dev-fast "Add retry logic to youtube_upload.py"
-/dev-fast agent_tools/buffer_api "Add rate limiting support"
+/dev-fast "Add retry logic to the upload module"
 /dev-fast task_tracker "Add delete task feature"
 ```
 

@@ -12,8 +12,7 @@ Full TDD cycle: plan the feature, write tests first, then write code to make the
 
 ```
 /dev-tdd <task description>
-/dev-tdd "Add retry logic to youtube_upload.py"
-/dev-tdd agent_tools/buffer_api "Add rate limiting support"
+/dev-tdd "Add retry logic to the upload module"
 /dev-tdd task_tracker "Add delete task feature"
 ```
 

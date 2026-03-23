@@ -1,6 +1,6 @@
-# Python Conventions — agent_tools/
+# Python Conventions
 
-All Python code in `agent_tools/` follows these conventions. Referenced by `sde`, `test-eng`, and `python-reviewer`.
+All Python code in this project follows these conventions. Referenced by `sde`, `test-eng`, and `python-reviewer`.
 
 ## Style: PEP 8
 
@@ -216,16 +216,16 @@ Extract helpers, split modules, decompose classes when limits are hit.
 
 **DO:**
 ```bash
-uv run --directory agent_tools/<tool> python script.py
-uv add --directory agent_tools/<tool> some-package
+uv run --directory <project> python script.py
+uv add --directory <project> some-package
 ```
 
 **DON'T:**
 ```bash
-python3 agent_tools/<tool>/script.py                  # system python
-agent_tools/<tool>/venv/bin/python script.py           # venv path
-source agent_tools/<tool>/venv/bin/activate             # source activate
-pip install some-package                                # system pip
+python3 <project>/script.py                    # system python
+<project>/venv/bin/python script.py             # venv path
+source <project>/venv/bin/activate              # source activate
+pip install some-package                        # system pip
 ```
 
 ## Testing Conventions

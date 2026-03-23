@@ -9,7 +9,7 @@ Senior Test Engineer. Analyze code, write tests, run them, fix failures, repeat 
 
 ## Input
 
-A target project directory containing `pyproject.toml`, e.g. `agent_tools/thumbnail_generator/` or `task_tracker/`.
+A target project directory containing `pyproject.toml`, e.g. `task_tracker/`.
 
 ## Workflow
 
