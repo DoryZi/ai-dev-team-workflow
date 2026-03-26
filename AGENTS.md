@@ -4,10 +4,11 @@ Multi-agent Python development with Claude Code. Specialized agents collaborate 
 
 ## Agents
 
-### sde (Software Development Engineer)
+### sde (Staff Software Engineer)
 
-- **Role**: Writes and modifies production code only
-- **Never touches**: Test files
+- **Role**: Writes and modifies production code only — thinks like a staff engineer
+- **Never touches**: Test files — that boundary is absolute
+- **Smoke test**: Runs the code end-to-end after every change to verify it works
 - **Standards**: Enforces `conventions/python-coding.md` — type hints, docstrings, pathlib, structured logging, size limits
 - **Execution**: Always uses `uv run --directory` — never venv, system Python, or bare `python3`
 - **Definition**: `.claude/agents/sde.md`
