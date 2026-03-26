@@ -10,7 +10,7 @@ task_tracker/              ← sample app (the code being developed)
 ├── tracker.py
 └── tests/
 .claude/
-├── agents/                ← sde, test-eng, code-reviewer
+├── agents/                ← sde, test-eng
 └── skills/                ← dev-tdd, dev-fast, run-tests, python-reviewer, review
 conventions/
 └── python-coding.md       ← full coding standards (agents reference this)

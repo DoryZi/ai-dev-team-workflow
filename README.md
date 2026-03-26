@@ -55,7 +55,7 @@ Agents are defined in `.claude/agents/` and enforce strict boundaries: sde never
 | `/dev-fast` | Code-first: plan → code → tests → test loop → review |
 | `/run-tests` | Discover and run pytest across all project directories |
 | `/python-reviewer` | Static analysis + code review on changes |
-| `/review` | AI code review on working tree diff (lives in `ai-code-review-demo/`) |
+| `/review` | AI code review on working tree diff |
 
 ## Project Structure
 
