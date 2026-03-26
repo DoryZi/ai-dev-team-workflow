@@ -60,6 +60,8 @@ User request
 - Skill definitions: `.claude/skills/<name>/SKILL.md`
 - Coding standards: `conventions/python-coding.md`
 - Agent and skill templates: `conventions/agent-template.md`, `conventions/skill-template.md`
+- Unit test template: `conventions/unit-test-template.md`
+- E2E test template: `conventions/e2e-test-template.md`
 
 ## Adapting for Your Project
 
