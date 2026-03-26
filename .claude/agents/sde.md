@@ -41,6 +41,32 @@ Each project directory is self-contained with a `pyproject.toml`:
 
 Follow **[conventions/python-coding.md](../../conventions/python-coding.md)** for all Python style, naming, type hints, logging, error handling, paths, docstrings, secrets, size limits, and testing conventions.
 
+## Workflow: Planning
+
+When asked to plan a feature (before writing code), produce:
+
+1. **Implementation plan** — files to create/modify, key functions and signatures, edge cases, dependencies
+2. **Acceptance criteria** — a checklist that defines "done" for the feature. These criteria are handed to the test engineer to write tests against.
+
+```
+## Acceptance Criteria: <feature name>
+
+### Must pass (core behavior):
+- [ ] Adding a task with a valid title creates it in the store
+- [ ] Adding a task with an empty title raises ValueError
+- [ ] New tasks get auto-incrementing IDs
+
+### Should pass (edge cases):
+- [ ] Adding to an empty store works (creates file)
+- [ ] Title whitespace is stripped
+
+### Error handling:
+- [ ] Missing store file is handled gracefully
+- [ ] Invalid JSON in store raises clear error
+```
+
+The acceptance criteria are the contract between you and the test engineer. Be specific — vague criteria lead to vague tests.
+
 ## Workflow: New Project
 
 1. Create directory: `<project_dir>/`

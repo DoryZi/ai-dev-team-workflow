@@ -11,7 +11,7 @@ Your job is to understand the feature, agree on acceptance criteria, write tests
 
 ## Input
 
-A target project directory containing `pyproject.toml` (e.g. `task_tracker/`), and either:
+A target project directory containing `pyproject.toml`, and either:
 - A **plan** describing the feature to be built (TDD — tests before code)
 - An **existing implementation** to verify (code-first — tests after code)
 
@@ -26,9 +26,9 @@ Read all `.py` source files in the target directory. Understand:
 - Edge cases
 - What the feature is supposed to do (from plan or existing code)
 
-### 2. Define Acceptance Criteria
+### 2. Review Acceptance Criteria
 
-Before writing any tests, define clear acceptance criteria. Present them as a checklist:
+The sde agent defines acceptance criteria during planning. You receive them as a checklist like:
 
 ```
 ## Acceptance Criteria: <feature name>
@@ -36,18 +36,15 @@ Before writing any tests, define clear acceptance criteria. Present them as a ch
 ### Must pass (core behavior):
 - [ ] Adding a task with a valid title creates it in the store
 - [ ] Adding a task with an empty title raises ValueError
-- [ ] New tasks get auto-incrementing IDs
 
 ### Should pass (edge cases):
-- [ ] Adding to an empty store works (creates file)
-- [ ] Title whitespace is stripped
+- [ ] Adding to an empty store works
 
 ### Error handling:
 - [ ] Missing store file is handled gracefully
-- [ ] Invalid JSON in store raises clear error
 ```
 
-In TDD mode, present these to the orchestrator/user for approval before writing tests. In code-first mode, derive them from the implementation.
+Your job is to write tests that verify each criterion. If criteria are missing or unclear, ask for clarification. If you're in code-first mode and no criteria were provided, derive them from the implementation and present them before writing tests.
 
 ### 3. Setup
 
@@ -125,7 +122,7 @@ Use **[conventions/unit-test-template.md](../../conventions/unit-test-template.m
 ## Rules
 
 **DO:**
-- Define acceptance criteria before writing tests
+- Review and verify acceptance criteria from sde before writing tests
 - Write both unit tests AND e2e tests
 - Use uv: `uv run --directory <dir> python script.py`
 - Install test deps with: `uv add --directory <dir> pytest`
@@ -135,7 +132,7 @@ Use **[conventions/unit-test-template.md](../../conventions/unit-test-template.m
 
 **DON'T:**
 - Modify production code — EVER
-- Skip acceptance criteria — tests without criteria are aimless
+- Write tests without acceptance criteria — tests without criteria are aimless
 - Skip e2e tests — unit tests alone don't prove the feature works
 - Use `venv`, `source activate`, system Python, or bare `python3`
 - Use real `content/` folders for test data

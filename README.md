@@ -15,9 +15,9 @@ cd ai-dev-team-workflow
 
 This triggers the full TDD cycle and you can watch the agents work:
 
-1. **sde** plans the implementation
-2. **test-eng** writes tests for the delete feature (red phase — tests fail)
-3. **sde** writes code to make them pass (green phase)
+1. **sde** plans the implementation and defines acceptance criteria
+2. **test-eng** writes unit + e2e tests against the criteria (red phase — tests fail)
+3. **sde** writes code to make them pass, runs a smoke test (green phase)
 4. **/run-tests** verifies everything passes
 5. **/python-reviewer** reviews the final code
 
@@ -42,8 +42,8 @@ This triggers the full TDD cycle and you can watch the agents work:
 
 | Agent | Role | Writes |
 |-------|------|--------|
-| **sde** | Python developer | Production code only |
-| **test-eng** | Test engineer | Test code only |
+| **sde** | Staff software engineer — plans features, defines acceptance criteria, writes production code, runs smoke tests | Production code only |
+| **test-eng** | Senior test engineer — reviews acceptance criteria, writes unit + e2e tests, iterates until green | Test code only |
 
 Agents are defined in `.claude/agents/` and enforce strict boundaries: sde never touches tests, test-eng never touches production code.
 
@@ -75,7 +75,11 @@ ai-dev-team-workflow/
 │       ├── run-tests/
 │       └── python-reviewer/
 ├── conventions/
-│   └── python-coding.md       ← coding standards (agents reference this)
+│   ├── python-coding.md       ← coding standards (agents reference this)
+│   ├── agent-template.md      ← template for creating new agents
+│   ├── skill-template.md      ← template for creating new skills
+│   ├── unit-test-template.md  ← pytest unit test patterns
+│   └── e2e-test-template.md   ← pytest e2e test patterns
 ├── ai-code-review-demo/       ← git submodule (has its own /review skill)
 ├── CLAUDE.md                  ← project rules & code boundaries
 └── README.md
@@ -93,13 +97,15 @@ The `task_tracker/` app is a simple CLI task manager that supports add, list, an
 | `/dev-fast task_tracker "Add task priority support"` | Code-first workflow |
 | `/run-tests task_tracker` | Run tests for task_tracker |
 | `/python-reviewer` | Review uncommitted changes |
-| `/review` | AI code review on diff (in `ai-code-review-demo/`) |
+| `/review` | AI code review on working tree diff |
 
 ## Adapting for Your Project
 
 1. Replace `task_tracker/` with your own Python project (needs `pyproject.toml`)
 2. Adjust `CLAUDE.md` with your project-specific rules and boundaries
-3. Optionally edit `conventions/python-coding.md` to match your style
+3. Edit `conventions/python-coding.md` to match your style
+4. Create new agents using `conventions/agent-template.md`
+5. Create new skills using `conventions/skill-template.md`
 
 The agents and skills work with any uv-managed Python project directory.
 
