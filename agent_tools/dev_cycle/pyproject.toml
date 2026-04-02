@@ -1,0 +1,8 @@
+[project]
+name = "dev-cycle"
+version = "0.1.0"
+description = "TDD dev-cycle pipeline for Python projects — orchestrates test-eng and sde agents via Claude Agent SDK"
+requires-python = ">=3.11"
+dependencies = [
+    "claude-agent-sdk>=0.1.50",
+]

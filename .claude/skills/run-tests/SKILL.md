@@ -12,7 +12,8 @@ Simple, mechanical test runner. Discover, execute, report. Never write or fix te
 
 ```
 /run-tests                                    # all testable directories
-/run-tests task_tracker/                      # one specific directory
+/run-tests agent_tools/thumbnail_generator/   # one specific directory
+/run-tests task_tracker/                      # any directory with pyproject.toml + tests/
 ```
 
 ## Scope

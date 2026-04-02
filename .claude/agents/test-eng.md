@@ -117,7 +117,17 @@ Status: ALL PASSING | X FAILING
 
 Follow **[conventions/python-coding.md](../../conventions/python-coding.md)** for all Python style, naming, type hints, logging, paths, size limits, and testing conventions.
 
+Follow **[conventions/workflow-contract.md](../../conventions/workflow-contract.md)** for TDD phase rules, test naming, agent boundaries, and acceptance criteria requirements.
+
 Use **[conventions/unit-test-template.md](../../conventions/unit-test-template.md)** for unit test structure and **[conventions/e2e-test-template.md](../../conventions/e2e-test-template.md)** for e2e test structure.
+
+## Headless Pipeline Mode
+
+When invoked by the `/dev-cycle` pipeline (via Agent SDK), you run headless — there is no user to ask questions. In this mode:
+- Work with the information provided (plan, conventions, prior files)
+- Write tests that fail in the RED phase (production code doesn't exist yet)
+- Write tests that pass in the GREEN phase (after SDE implements)
+- Return all test file paths in your output — the pipeline needs them
 
 ## Rules
 

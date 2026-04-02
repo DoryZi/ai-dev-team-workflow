@@ -1,6 +1,6 @@
-# Python Conventions
+# Python Conventions — agent_tools/
 
-All Python code in this project follows these conventions. Referenced by `sde`, `test-eng`, and `python-reviewer`.
+All Python code in `agent_tools/` follows these conventions. Referenced by `sde`, `test-eng`, and `python-reviewer`.
 
 ## Style: PEP 8
 
@@ -24,6 +24,16 @@ def ProcessThumbnail(inputPath):    # camelCase / PascalCase functions
     maxRetries = 3                  # camelCase variables
     defaultCodec = "h264"           # camelCase constants
 ```
+
+## Future Annotations
+
+Every Python file must start with:
+
+```python
+from __future__ import annotations
+```
+
+This enables modern type hint syntax (`str | None` instead of `Optional[str]`) and deferred evaluation.
 
 ## Type Hints
 
@@ -216,16 +226,16 @@ Extract helpers, split modules, decompose classes when limits are hit.
 
 **DO:**
 ```bash
-uv run --directory <project> python script.py
-uv add --directory <project> some-package
+uv run --directory agent_tools/<tool> python script.py
+uv add --directory agent_tools/<tool> some-package
 ```
 
 **DON'T:**
 ```bash
-python3 <project>/script.py                    # system python
-<project>/venv/bin/python script.py             # venv path
-source <project>/venv/bin/activate              # source activate
-pip install some-package                        # system pip
+python3 agent_tools/<tool>/script.py                  # system python
+agent_tools/<tool>/venv/bin/python script.py           # venv path
+source agent_tools/<tool>/venv/bin/activate             # source activate
+pip install some-package                                # system pip
 ```
 
 ## Testing Conventions

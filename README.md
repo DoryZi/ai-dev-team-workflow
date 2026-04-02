@@ -2,6 +2,21 @@
 
 Multi-agent Python development with [Claude Code](https://claude.ai/claude-code). Specialized AI agents collaborate through slash commands to plan, code, test, and review — like a real engineering team.
 
+## What's New (v2 — TDD Pipeline)
+
+This version replaces the original `/dev-tdd` and `/dev-fast` skills with a two-skill architecture:
+
+- **`/plan`** — interactive research and design (user in the loop)
+- **`/dev-cycle`** — automated TDD execution pipeline (headless)
+
+### Why the rewrite?
+
+v1 relied on a single Claude Code session orchestrating everything inline — one prompt juggling planning, test writing, implementation, and review. It worked, but it was brittle and non-deterministic: steps got skipped, agent roles blurred, and there was no way to retry a failed phase or resume from where you left off.
+
+v2 fixes this by separating **planning** (interactive, human-in-the-loop) from **execution** (programmatic, headless). The execution pipeline (`/dev-cycle`) is a Python program with a proper state machine and retry policies. It uses the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk) to spawn isolated sub-agents (sde, test-eng) with strict role boundaries — each agent gets its own context, tools, and instructions. The orchestrator controls the flow, not the LLM.
+
+> Looking for the original v1 agents? See [`README-v1-tdd-agents.md`](README-v1-tdd-agents.md) or check out the [`v1-before-refactor`](../../tree/v1-before-refactor) tag.
+
 ## Quick Start
 
 ```bash
@@ -9,53 +24,67 @@ Multi-agent Python development with [Claude Code](https://claude.ai/claude-code)
 git clone --recurse-submodules https://github.com/DoryZi/ai-dev-team-workflow.git
 cd ai-dev-team-workflow
 
-# Open in Claude Code and run the demo
-/dev-tdd task_tracker "Add delete task feature"
+# 1. Plan the feature (interactive)
+/plan "Add delete task feature to task_tracker"
+
+# 2. Execute the plan (automated TDD pipeline)
+/dev-cycle plans/<your-plan>.md
 ```
-
-This triggers the full TDD cycle and you can watch the agents work:
-
-1. **sde** plans the implementation and defines acceptance criteria
-2. **test-eng** writes unit + e2e tests against the criteria (red phase — tests fail)
-3. **sde** writes code to make them pass, runs a smoke test (green phase)
-4. **/run-tests** verifies everything passes
-5. **/python-reviewer** reviews the final code
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  /dev-tdd                        │
-│              (orchestrator skill)                │
-├────────┬──────────┬──────────────┬──────────────┤
-│  Plan  │  Tests   │    Code      │   Review     │
-│        │          │              │              │
-│  sde   │ test-eng │    sde       │   /review    │
-│ agent  │  agent   │   agent      │   + ruff     │
-├────────┴──────────┴──────────────┴──────────────┤
-│              /run-tests                          │
-│         (discovers & runs pytest)                │
-└─────────────────────────────────────────────────┘
+/plan (interactive)              /dev-cycle (automated)
+┌─────────────────────┐         ┌─────────────────────────┐
+│ Research & Design    │         │ Execution               │
+│                     │         │                         │
+│ • Understand task   │         │ For each step:          │
+│ • Explore codebase  │  plan   │  • RED   — test-eng     │
+│ • Define ACs        │ ─────→  │  • GREEN — sde          │
+│ • Design steps      │  .md    │  • VERIFY — pytest      │
+│ • Save plan         │  file   │  • LINT  — ruff         │
+│                     │         │  • COMMIT               │
+│ User in the loop    │         │                         │
+│ at every stage      │         │ Then: FINAL REVIEW      │
+└─────────────────────┘         │  static checks + /review│
+                                └─────────────────────────┘
 ```
+
+See [`conventions/orchestration-flow.md`](conventions/orchestration-flow.md) for the full state machine diagrams and phase transitions.
 
 ## Agents
 
-| Agent | Role | Writes |
-|-------|------|--------|
-| **sde** | Staff software engineer — plans features, defines acceptance criteria, writes production code, runs smoke tests | Production code only |
-| **test-eng** | Senior test engineer — reviews acceptance criteria, writes unit + e2e tests, iterates until green | Test code only |
+| Agent | Role | Used by |
+|-------|------|---------|
+| **sys-arch** | Systems architect — researches codebase, designs plans (read-only) | `/plan` |
+| **sde** | Staff software engineer — writes production code, runs smoke tests | `/dev-cycle` |
+| **test-eng** | Senior test engineer — writes unit + e2e tests against acceptance criteria | `/dev-cycle` |
 
-Agents are defined in `.claude/agents/` and enforce strict boundaries: sde never touches tests, test-eng never touches production code.
+Agents are defined in `.claude/agents/` and enforce strict boundaries: sde never touches tests, test-eng never touches production code, sys-arch never writes files.
 
 ## Skills (Slash Commands)
 
 | Skill | Description |
 |-------|-------------|
-| `/dev-tdd` | Full TDD: plan → tests first → code → test loop → review |
-| `/dev-fast` | Code-first: plan → code → tests → test loop → review |
+| `/plan` | Interactive: understand → explore → design → save plan |
+| `/dev-cycle` | Automated: RED → GREEN → VERIFY → LINT → COMMIT per step, then final review |
 | `/run-tests` | Discover and run pytest across all project directories |
 | `/python-reviewer` | Static analysis + code review on changes |
 | `/review` | AI code review on working tree diff |
+
+## Pipeline Tools
+
+The `/dev-cycle` execution engine lives in `agent_tools/dev_cycle/`. It's a Python program that uses the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk) to spawn sub-agents, with a custom state machine controlling phase transitions and retries:
+
+| File | Purpose |
+|------|---------|
+| `run.py` | Full pipeline — parse plan, run all steps, final review |
+| `run_step.py` | Single step/phase — for decomposed execution |
+| `pipeline.py` | Orchestrator — manages step loop and state transitions |
+| `state_machine.py` | Phase enum and transition logic |
+| `agents.py` | Agent config builders — prompts, tools, model per role |
+| `steps.py` | Phase runners — spawns agents via Agent SDK (red, green) or runs subprocess (verify, lint) |
+| `checks/` | Static checks, risk scoring, conventions loading |
 
 ## Project Structure
 
@@ -66,48 +95,50 @@ ai-dev-team-workflow/
 │   ├── tracker.py
 │   └── tests/
 ├── .claude/
-│   ├── agents/                ← agent definitions
-│   │   ├── sde.md
-│   │   └── test-eng.md
-│   └── skills/                ← slash command definitions
-│       ├── dev-tdd/
-│       ├── dev-fast/
-│       ├── run-tests/
-│       └── python-reviewer/
+│   ├── agents/                ← sde, test-eng, sys-arch
+│   └── skills/                ← plan, dev-cycle, run-tests, python-reviewer, review
+├── agent_tools/
+│   └── dev_cycle/             ← pipeline engine (Agent SDK)
 ├── conventions/
 │   ├── python-coding.md       ← coding standards (agents reference this)
-│   ├── agent-template.md      ← template for creating new agents
-│   ├── skill-template.md      ← template for creating new skills
-│   ├── unit-test-template.md  ← pytest unit test patterns
-│   └── e2e-test-template.md   ← pytest e2e test patterns
-├── ai-code-review-demo/       ← git submodule (has its own /review skill)
+│   ├── workflow-contract.md   ← TDD phase rules and agent boundaries
+│   └── orchestration-flow.md  ← full pipeline architecture docs
 ├── CLAUDE.md                  ← project rules & code boundaries
 └── README.md
 ```
 
 ## Demo Scenario
 
-The `task_tracker/` app is a simple CLI task manager that supports add, list, and complete. The **delete feature is intentionally missing** — that's the task you give to `/dev-tdd` to demonstrate the full multi-agent workflow.
+The `task_tracker/` app is a simple CLI task manager that supports add, list, and complete. The **delete feature is intentionally missing** — that's the task you give to `/plan` to demonstrate the full multi-agent workflow.
 
-### Available commands
+```bash
+# Step 1: Plan it (interactive — you approve each stage)
+/plan "Add delete task feature to task_tracker"
 
-| Command | What it does |
-|---------|-------------|
-| `/dev-tdd task_tracker "Add delete task feature"` | TDD workflow (tests first) |
-| `/dev-fast task_tracker "Add task priority support"` | Code-first workflow |
-| `/run-tests task_tracker` | Run tests for task_tracker |
-| `/python-reviewer` | Review uncommitted changes |
-| `/review` | AI code review on working tree diff |
+# Step 2: Execute it (automated TDD pipeline)
+/dev-cycle plans/<your-plan>.md
+
+# Or run a single phase manually
+/dev-cycle plans/<your-plan>.md --step 1 --red
+/dev-cycle plans/<your-plan>.md --step 1 --green
+/dev-cycle plans/<your-plan>.md --final-review
+```
 
 ## Adapting for Your Project
 
 1. Replace `task_tracker/` with your own Python project (needs `pyproject.toml`)
 2. Adjust `CLAUDE.md` with your project-specific rules and boundaries
 3. Edit `conventions/python-coding.md` to match your style
-4. Create new agents using `conventions/agent-template.md`
-5. Create new skills using `conventions/skill-template.md`
+4. Review `conventions/workflow-contract.md` for phase rules and agent boundaries
 
 The agents and skills work with any uv-managed Python project directory.
+
+## Previous Version
+
+The v1 workflow used simpler `/dev-tdd` and `/dev-fast` skills that orchestrated agents inline (no Agent SDK, no state machine). That version is preserved:
+
+- **README:** [`README-v1-tdd-agents.md`](README-v1-tdd-agents.md)
+- **Tag:** [`v1-before-refactor`](../../tree/v1-before-refactor) — checkout this tag to get the full v1 codebase
 
 ## Part of AI Will Replace You
 

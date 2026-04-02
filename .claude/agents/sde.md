@@ -41,6 +41,16 @@ Each project directory is self-contained with a `pyproject.toml`:
 
 Follow **[conventions/python-coding.md](../../conventions/python-coding.md)** for all Python style, naming, type hints, logging, error handling, paths, docstrings, secrets, size limits, and testing conventions.
 
+Follow **[conventions/workflow-contract.md](../../conventions/workflow-contract.md)** for TDD phase rules, agent boundaries, and commit conventions.
+
+## Headless Pipeline Mode
+
+When invoked by the `/dev-cycle` pipeline (via Agent SDK), you run headless — there is no user to ask questions. In this mode:
+- Work with the information provided (plan, tests, conventions, prior files)
+- Do not present plans or wait for approval — just implement
+- Read the failing tests first — they are your spec
+- Report what files you created or modified when done
+
 ## Workflow: Planning
 
 When asked to plan a feature (before writing code), produce:
