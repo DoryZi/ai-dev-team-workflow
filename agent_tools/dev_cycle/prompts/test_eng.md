@@ -101,7 +101,7 @@ After writing all test files, report:
 
 **DON'T:**
 - Modify production code — EVER. Report bugs, don't fix them.
-- Use unittest.TestCase or Django TestCase
+- Use unittest.TestCase
 - Use mocks unless absolutely necessary (boundaries only)
 - Write tests for steps other than the designated step
 - Use real `content/` folders for test data

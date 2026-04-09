@@ -1,8 +1,10 @@
 """Full pipeline orchestrator for the TDD dev-cycle.
 
 Parses a plan file, then executes each step through the state machine:
-RED → GREEN → VERIFY → LINT → COMMIT. After all steps, runs the final
-review (static checks + /review) before PR creation.
+[EXPLORE] → RED → GREEN → VERIFY → LINT → [REVIEW] → COMMIT.
+After all steps, runs the final review before PR creation.
+
+The EXPLORE and REVIEW phases are controlled by config flags.
 
 Usage:
     from pipeline import run_pipeline
@@ -22,11 +24,14 @@ from schemas import (
 )
 from state_machine import Phase
 from steps import (
+    run_explore,
     run_final_review,
     run_green,
     run_green_fix,
     run_lint,
+    run_quality_gates,
     run_red,
+    run_review,
     run_verify,
 )
 
@@ -67,6 +72,20 @@ async def run_pipeline(config: PipelineConfig) -> PipelineResult:
 
     result = PipelineResult(status="success")
     prior_files: list[str] = []
+    explore_context = ""
+
+    # --- EXPLORE phase (runs once before all steps) ---
+    if not config.skip_explore:
+        logger.info("=" * 60)
+        logger.info("EXPLORE — Codebase research")
+        logger.info("=" * 60)
+        try:
+            explore_result = await run_explore(plan=plan, config=config)
+            result.explore = explore_result
+            result.total_cost_usd += explore_result.cost_usd
+            explore_context = explore_result.context
+        except Exception as exc:
+            logger.warning("Explore phase failed (non-fatal): %s", exc)
 
     # Collect prior files from steps before the starting step
     if config.step is not None:
@@ -91,6 +110,7 @@ async def run_pipeline(config: PipelineConfig) -> PipelineResult:
                 plan_text=plan.raw_text,
                 prior_files=prior_files,
                 config=config,
+                explore_context=explore_context,
             )
         except Exception as exc:
             logger.error("Step %d failed with exception: %s", step.number, exc)
@@ -121,7 +141,7 @@ async def run_pipeline(config: PipelineConfig) -> PipelineResult:
         logger.info("=" * 60)
 
         try:
-            result.final_review = run_final_review(config)
+            result.final_review = await run_final_review(config)
         except Exception as exc:
             logger.error("Final review failed: %s", exc)
             result.final_review = None
@@ -137,6 +157,7 @@ async def _run_step(
     plan_text: str,
     prior_files: list[str],
     config: PipelineConfig,
+    explore_context: str = "",
 ) -> StepResult:
     """Execute a single step through the full phase cycle.
 
@@ -146,6 +167,7 @@ async def _run_step(
         plan_text: Full plan markdown text.
         prior_files: Files from previously completed steps.
         config: Pipeline configuration.
+        explore_context: Codebase exploration context from the EXPLORE phase.
 
     Returns:
         Updated StepResult with phase results.
@@ -157,6 +179,7 @@ async def _run_step(
         plan_text=plan_text,
         config=config,
         prior_files=prior_files,
+        explore_context=explore_context,
     )
     step_result.cost_usd += step_result.red.cost_usd
     test_files = step_result.red.test_files
@@ -169,6 +192,7 @@ async def _run_step(
         test_files=test_files,
         config=config,
         prior_files=prior_files,
+        explore_context=explore_context,
     )
     step_result.cost_usd += step_result.green.cost_usd
 
@@ -194,6 +218,7 @@ async def _run_step(
                 failure_output=failure_output,
                 config=config,
                 prior_files=prior_files,
+                explore_context=explore_context,
             )
             step_result.cost_usd += fix_result.cost_usd
 
@@ -214,6 +239,65 @@ async def _run_step(
         # ruff --fix already ran inside run_lint, so just retry the check
         if attempt < config.max_lint_attempts:
             logger.info("[Step %d] Lint issues remain — retrying", step.number)
+
+    # --- Quality gate: post-verify ---
+    run_quality_gates("post-verify", config)
+
+    # --- REVIEW (LLM convention review, agent/full modes only) ---
+    if config.review_mode in ("agent", "full"):
+        diff_proc = subprocess.run(
+            ["git", "diff", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=config.cwd,
+        )
+
+        for review_attempt in range(1, config.max_review_iterations + 1):
+            logger.info(
+                "[Step %d] Phase: REVIEW (attempt %d/%d)",
+                step.number, review_attempt, config.max_review_iterations,
+            )
+            step_result.review = await run_review(
+                diff=diff_proc.stdout,
+                changed_files=all_changed,
+                config=config,
+            )
+            step_result.cost_usd += step_result.review.cost_usd
+
+            if not step_result.review.has_critical_or_high:
+                break
+
+            # SDE fixes based on review findings
+            if review_attempt < config.max_review_iterations:
+                findings_text = "\n".join(
+                    f"- [{f.severity}] {f.file}:{f.line} — {f.title}: {f.detail}"
+                    for f in step_result.review.findings
+                )
+                logger.info("[Step %d] Review found issues — SDE fixing", step.number)
+                fix_result = await run_green_fix(
+                    step=step,
+                    plan_text=plan_text,
+                    test_files=test_files,
+                    failure_output=f"Review findings:\n{findings_text}",
+                    config=config,
+                    prior_files=prior_files,
+                    explore_context=explore_context,
+                )
+                step_result.cost_usd += fix_result.cost_usd
+
+                # Re-get diff after fix
+                diff_proc = subprocess.run(
+                    ["git", "diff", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    cwd=config.cwd,
+                )
+
+        # Quality gate: post-review
+        run_quality_gates("post-review", config)
+
+    # --- Quality gate: pre-commit ---
+    run_quality_gates("pre-commit", config)
 
     # --- COMMIT ---
     logger.info("[Step %d] Phase: COMMIT", step.number)

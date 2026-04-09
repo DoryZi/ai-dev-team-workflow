@@ -1,7 +1,9 @@
 """Phase execution functions for the dev-cycle pipeline.
 
 Each function runs one phase of the TDD cycle and returns a typed result.
-Agent phases (RED, GREEN) use the Claude Agent SDK to spawn sub-agents.
+Agent phases (RED, GREEN, REVIEW, ENG-REVIEW, EXPLORE) use the Claude Agent
+SDK ``query()`` — each call is an isolated, stateless session. The pipeline
+orchestrator manages all inter-process communication.
 Mechanical phases (VERIFY, LINT) use subprocess calls.
 """
 from __future__ import annotations
@@ -10,24 +12,90 @@ import json
 import logging
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
-from claude_agent_sdk import Agent, run_agent
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
-from agents import make_sde_agent, make_test_eng_agent
-from checks.conventions_loader import get_conventions_for_step
+from agents import (
+    make_eng_review_agent,
+    make_explore_agent,
+    make_review_agent,
+    make_sde_agent,
+    make_test_eng_agent,
+)
+from checks.conventions_loader import get_conventions_for_step, get_conventions_header
+from checks.risk_scorer import score_risk
 from checks.static_checks import check_files
 from config import PipelineConfig
-from plan_parser import PlanStep
+from plan_parser import Plan, PlanStep
 from schemas import (
+    AgentReviewResult,
+    EngReviewResult,
+    ExploreResult,
     GreenResult,
     LintResult,
     RedResult,
-    ReviewResult,
+    ReviewFinding,
+    StaticReviewResult,
     VerifyResult,
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class QueryResult:
+    """Result from a single query() call.
+
+    Attributes:
+        output: The agent's text output.
+        cost_usd: Total cost of the query.
+    """
+
+    output: str = ""
+    cost_usd: float = 0.0
+
+
+async def _run_query(
+    prompt: str,
+    tools: list[str],
+    model: str,
+    cwd: str,
+) -> QueryResult:
+    """Run a single isolated query() session.
+
+    Each call is stateless — no conversation history carries over.
+    The pipeline manages all context passing between phases.
+
+    Args:
+        prompt: Full prompt for the agent.
+        tools: List of tool names the agent can use.
+        model: Model identifier.
+        cwd: Working directory for the session.
+
+    Returns:
+        QueryResult with output text and cost.
+    """
+    options = ClaudeAgentOptions(
+        allowed_tools=tools,
+        model=model,
+        cwd=cwd,
+        permission_mode="bypassPermissions",
+    )
+
+    output_parts: list[str] = []
+    cost_usd = 0.0
+
+    async for event in query(prompt=prompt, options=options):
+        if isinstance(event, ResultMessage):
+            output_parts.append(event.result or "")
+            cost_usd = event.total_cost_usd or 0.0
+
+    return QueryResult(
+        output="\n".join(output_parts),
+        cost_usd=cost_usd,
+    )
 
 
 async def run_red(
@@ -35,6 +103,7 @@ async def run_red(
     plan_text: str,
     config: PipelineConfig,
     prior_files: list[str],
+    explore_context: str = "",
 ) -> RedResult:
     """Execute the RED phase — test-eng writes failing tests.
 
@@ -43,6 +112,7 @@ async def run_red(
         plan_text: Full plan markdown text.
         config: Pipeline configuration.
         prior_files: Files from previously completed steps.
+        explore_context: Codebase exploration context from the EXPLORE phase.
 
     Returns:
         RedResult with test file paths and cost.
@@ -55,18 +125,16 @@ async def run_red(
         conventions=conventions,
         plan_text=plan_text,
         prior_files=prior_files,
+        explore_context=explore_context,
     )
 
-    agent = Agent(
+    result = await _run_query(
         prompt=agent_config["prompt"],
         tools=agent_config["tools"],
         model=agent_config["model"],
         cwd=config.cwd,
     )
 
-    result = await run_agent(agent)
-
-    # Extract test file paths from agent output
     test_files = _extract_file_paths(result.output, pattern=r"test.*\.py")
 
     logger.info("[RED] Step %d — %d test files written", step.number, len(test_files))
@@ -84,6 +152,7 @@ async def run_green(
     config: PipelineConfig,
     prior_files: list[str],
     extra_context: str = "",
+    explore_context: str = "",
 ) -> GreenResult:
     """Execute the GREEN phase — SDE implements production code.
 
@@ -94,6 +163,7 @@ async def run_green(
         config: Pipeline configuration.
         prior_files: Files from previously completed steps.
         extra_context: Optional context (e.g. previous failure output).
+        explore_context: Codebase exploration context from the EXPLORE phase.
 
     Returns:
         GreenResult with changed file paths and cost.
@@ -108,18 +178,16 @@ async def run_green(
         test_files=test_files,
         prior_files=prior_files,
         extra_context=extra_context,
+        explore_context=explore_context,
     )
 
-    agent = Agent(
+    result = await _run_query(
         prompt=agent_config["prompt"],
         tools=agent_config["tools"],
         model=agent_config["model"],
         cwd=config.cwd,
     )
 
-    result = await run_agent(agent)
-
-    # Extract changed file paths from agent output
     changed_files = _extract_file_paths(result.output, pattern=r"\.py")
 
     logger.info("[GREEN] Step %d — %d files changed", step.number, len(changed_files))
@@ -137,6 +205,7 @@ async def run_green_fix(
     failure_output: str,
     config: PipelineConfig,
     prior_files: list[str],
+    explore_context: str = "",
 ) -> GreenResult:
     """Execute a GREEN fix — SDE fixes code based on test failures.
 
@@ -147,6 +216,7 @@ async def run_green_fix(
         failure_output: Test failure output to help SDE fix the code.
         config: Pipeline configuration.
         prior_files: Files from previously completed steps.
+        explore_context: Codebase exploration context from the EXPLORE phase.
 
     Returns:
         GreenResult with changed file paths and cost.
@@ -167,6 +237,7 @@ Do NOT modify test files.
         config=config,
         prior_files=prior_files,
         extra_context=extra_context,
+        explore_context=explore_context,
     )
 
 
@@ -290,23 +361,157 @@ def run_lint(
     return LintResult(passed=passed, violations=violations)
 
 
-def run_final_review(
+async def run_explore(
+    plan: Plan,
     config: PipelineConfig,
-) -> ReviewResult:
-    """Execute the FINAL_REVIEW phase — static checks + /review.
+) -> ExploreResult:
+    """Execute the EXPLORE phase — codebase research before implementation.
 
-    Runs mechanical static checks on all changed files, then invokes
-    the ``/review`` skill via the Claude CLI for a full code review.
+    Spawns an explorer agent that reads the codebase, past plans, and
+    discussions to document patterns, utilities, and risks.
+
+    Args:
+        plan: Parsed plan with steps and file lists.
+        config: Pipeline configuration.
+
+    Returns:
+        ExploreResult with exploration context and cost.
+    """
+    logger.info("[EXPLORE] Researching codebase")
+
+    all_files = []
+    for step in plan.steps:
+        all_files.extend(step.files)
+
+    agent_config = make_explore_agent(
+        plan_text=plan.raw_text,
+        plan_files=all_files,
+        cwd=config.cwd,
+    )
+
+    result = await _run_query(
+        prompt=agent_config["prompt"],
+        tools=agent_config["tools"],
+        model=agent_config["model"],
+        cwd=config.cwd,
+    )
+
+    logger.info("[EXPLORE] Complete — %.0f chars of context", len(result.output))
+
+    return ExploreResult(
+        context=result.output,
+        cost_usd=result.cost_usd,
+    )
+
+
+async def run_review(
+    diff: str,
+    changed_files: list[str],
+    config: PipelineConfig,
+) -> AgentReviewResult:
+    """Execute per-step LLM convention review.
+
+    Args:
+        diff: Git diff for the step's changes.
+        changed_files: List of file paths changed in this step.
+        config: Pipeline configuration.
+
+    Returns:
+        AgentReviewResult with findings and severity assessment.
+    """
+    logger.info("[REVIEW] LLM convention review on %d files", len(changed_files))
+
+    conventions = get_conventions_header(Path(config.cwd))
+    agent_config = make_review_agent(
+        conventions=conventions,
+        diff=diff,
+        changed_files=changed_files,
+    )
+
+    result = await _run_query(
+        prompt=agent_config["prompt"],
+        tools=agent_config["tools"],
+        model=agent_config["model"],
+        cwd=config.cwd,
+    )
+
+    findings = _parse_review_findings(result.output)
+    has_critical_or_high = any(f.severity in ("CRITICAL", "HIGH") for f in findings)
+
+    logger.info(
+        "[REVIEW] %d findings, critical_or_high=%s",
+        len(findings),
+        has_critical_or_high,
+    )
+
+    return AgentReviewResult(
+        findings=findings,
+        has_critical_or_high=has_critical_or_high,
+        cost_usd=result.cost_usd,
+    )
+
+
+async def run_eng_review(
+    full_diff: str,
+    changed_files: list[str],
+    config: PipelineConfig,
+) -> EngReviewResult:
+    """Execute final LLM engineering review on the full branch diff.
+
+    Args:
+        full_diff: Full branch diff.
+        changed_files: List of all changed file paths.
+        config: Pipeline configuration.
+
+    Returns:
+        EngReviewResult with findings, risk summary, and verdict.
+    """
+    logger.info("[ENG_REVIEW] Senior engineer review on full diff")
+
+    conventions = get_conventions_header(Path(config.cwd))
+    mechanical_scores = score_risk(full_diff, changed_files)
+
+    agent_config = make_eng_review_agent(
+        conventions=conventions,
+        diff=full_diff,
+        changed_files=changed_files,
+        mechanical_scores=mechanical_scores,
+    )
+
+    result = await _run_query(
+        prompt=agent_config["prompt"],
+        tools=agent_config["tools"],
+        model=agent_config["model"],
+        cwd=config.cwd,
+    )
+
+    findings = _parse_review_findings(result.output)
+    risk_summary = _parse_field(result.output, "risk_summary") or ""
+    verdict = _parse_field(result.output, "verdict") or "APPROVE"
+
+    logger.info("[ENG_REVIEW] Verdict: %s, %d findings", verdict, len(findings))
+
+    return EngReviewResult(
+        findings=findings,
+        risk_summary=risk_summary,
+        verdict=verdict,
+        cost_usd=result.cost_usd,
+    )
+
+
+def run_final_review_static(
+    config: PipelineConfig,
+) -> StaticReviewResult:
+    """Execute static-only FINAL_REVIEW — static checks + /review CLI.
 
     Args:
         config: Pipeline configuration.
 
     Returns:
-        ReviewResult with findings, verdict, and summary.
+        StaticReviewResult with findings, verdict, and summary.
     """
     logger.info("[FINAL_REVIEW] Running static checks + /review")
 
-    # Get changed files from git
     diff_proc = subprocess.run(
         ["git", "diff", "--name-only", config.base_branch],
         capture_output=True,
@@ -315,7 +520,6 @@ def run_final_review(
     )
     changed_files = [f.strip() for f in diff_proc.stdout.strip().splitlines() if f.strip()]
 
-    # Run static checks
     static_violations = check_files(changed_files, config.cwd)
     static_summary = f"{len(static_violations)} static check violations"
     if static_violations:
@@ -325,21 +529,17 @@ def run_final_review(
         )
         logger.info("[FINAL_REVIEW] Static checks:\n%s", static_details)
 
-    # Invoke /review via Claude CLI
     review_context = ""
     if static_violations:
         review_context = "Static check findings (already flagged — focus on contextual issues):\n"
         review_context += "\n".join(f"- {v.rule}: {v.message} ({v.file}:{v.line})" for v in static_violations)
 
+    prompt = f"Run /review on the current branch diff against {config.base_branch}."
+    if review_context:
+        prompt += f" Additional context: {review_context}"
+
     review_proc = subprocess.run(
-        [
-            "claude",
-            "--print",
-            "--allowedTools", "Read,Glob,Grep",
-            "-p", f"Run /review on the current branch diff against {config.base_branch}. "
-                  f"Additional context: {review_context}" if review_context else
-                  f"Run /review on the current branch diff against {config.base_branch}.",
-        ],
+        ["claude", "--print", "--allowedTools", "Read,Glob,Grep", "-p", prompt],
         capture_output=True,
         text=True,
         cwd=config.cwd,
@@ -347,8 +547,6 @@ def run_final_review(
     )
 
     review_output = review_proc.stdout
-
-    # Parse verdict from review output
     verdict = "APPROVE"
     if "BLOCK" in review_output.upper():
         verdict = "BLOCK"
@@ -356,14 +554,97 @@ def run_final_review(
         verdict = "WARNING"
 
     summary = f"{static_summary}. Review verdict: {verdict}"
-
     logger.info("[FINAL_REVIEW] %s", summary)
 
-    return ReviewResult(
+    return StaticReviewResult(
         findings=[{"static_violations": len(static_violations)}],
         verdict=verdict,
         summary=summary,
     )
+
+
+async def run_final_review(
+    config: PipelineConfig,
+) -> StaticReviewResult | EngReviewResult:
+    """Execute the FINAL_REVIEW phase based on review_mode.
+
+    Args:
+        config: Pipeline configuration.
+
+    Returns:
+        StaticReviewResult or EngReviewResult depending on review_mode.
+    """
+    diff_proc = subprocess.run(
+        ["git", "diff", config.base_branch],
+        capture_output=True,
+        text=True,
+        cwd=config.cwd,
+    )
+    full_diff = diff_proc.stdout
+
+    name_proc = subprocess.run(
+        ["git", "diff", "--name-only", config.base_branch],
+        capture_output=True,
+        text=True,
+        cwd=config.cwd,
+    )
+    changed_files = [f.strip() for f in name_proc.stdout.strip().splitlines() if f.strip()]
+
+    if config.review_mode == "static":
+        return run_final_review_static(config)
+
+    if config.review_mode == "agent":
+        return await run_eng_review(full_diff, changed_files, config)
+
+    # "full" mode — run both static checks and LLM eng-review
+    static_result = run_final_review_static(config)
+    eng_result = await run_eng_review(full_diff, changed_files, config)
+
+    # Log both results
+    logger.info(
+        "[FINAL_REVIEW] Full mode — static: %s, eng: %s",
+        static_result.verdict,
+        eng_result.verdict,
+    )
+
+    return eng_result
+
+
+def run_quality_gates(
+    gate_name: str,
+    config: PipelineConfig,
+) -> bool:
+    """Run quality gate hook commands.
+
+    Args:
+        gate_name: Gate point name (e.g. "post-verify", "post-review", "pre-commit").
+        config: Pipeline configuration.
+
+    Returns:
+        True if all gate commands pass (or no gates configured).
+    """
+    if not config.quality_gates:
+        return True
+
+    for cmd in config.quality_gates:
+        logger.info("[QUALITY_GATE] %s: running %s", gate_name, cmd)
+        proc = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=config.cwd,
+        )
+        if proc.returncode != 0:
+            logger.error(
+                "[QUALITY_GATE] %s: FAILED — %s\n%s",
+                gate_name,
+                cmd,
+                proc.stderr or proc.stdout,
+            )
+            return False
+
+    return True
 
 
 def _extract_file_paths(output: str, pattern: str) -> list[str]:
@@ -427,3 +708,80 @@ def _parse_pytest_failures(output: str) -> list[str]:
         reason = match.group(2).strip() if match.group(2) else "unknown"
         failures.append(f"{test_name}: {reason}")
     return failures
+
+
+def _parse_review_findings(output: str) -> list[ReviewFinding]:
+    """Parse review findings from agent output.
+
+    Attempts to extract a JSON block from the output. Falls back to
+    an empty list if no valid JSON is found.
+
+    Args:
+        output: Agent output text (may contain JSON embedded in markdown).
+
+    Returns:
+        List of ReviewFinding objects.
+    """
+    json_data = _extract_json(output)
+    if not json_data:
+        return []
+
+    raw_findings = json_data.get("findings", [])
+    findings: list[ReviewFinding] = []
+    for f in raw_findings:
+        if isinstance(f, dict):
+            findings.append(ReviewFinding(
+                severity=f.get("severity", ""),
+                file=f.get("file", ""),
+                line=f.get("line"),
+                title=f.get("title", ""),
+                detail=f.get("why", f.get("detail", "")),
+            ))
+    return findings
+
+
+def _parse_field(output: str, field: str) -> str | None:
+    """Extract a string field from JSON in agent output.
+
+    Args:
+        output: Agent output text.
+        field: JSON field name to extract.
+
+    Returns:
+        The field value as a string, or None if not found.
+    """
+    json_data = _extract_json(output)
+    if not json_data:
+        return None
+    value = json_data.get(field)
+    return str(value) if value is not None else None
+
+
+def _extract_json(text: str) -> dict | None:
+    """Extract the first JSON object from text.
+
+    Looks for JSON inside code fences first, then tries the raw text.
+
+    Args:
+        text: Text that may contain a JSON object.
+
+    Returns:
+        Parsed dict, or None if no valid JSON found.
+    """
+    # Try to find JSON in code fences
+    fence_match = re.search(r"```(?:json)?\s*\n(\{.*?\})\s*\n```", text, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Try to find a raw JSON object
+    brace_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    return None

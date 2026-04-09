@@ -9,6 +9,12 @@ Usage:
     uv run --directory agent_tools/dev_cycle python run_step.py \
         --plan plans/foo.md --step 3 --phase green --context "previous failures..."
     uv run --directory agent_tools/dev_cycle python run_step.py \
+        --plan plans/foo.md --phase explore
+    uv run --directory agent_tools/dev_cycle python run_step.py \
+        --plan plans/foo.md --step 3 --phase review --review-mode agent
+    uv run --directory agent_tools/dev_cycle python run_step.py \
+        --plan plans/foo.md --phase eng-review --review-mode agent
+    uv run --directory agent_tools/dev_cycle python run_step.py \
         --plan plans/foo.md --phase final-review
 
 Exit code 0 = success, 1 = failure.
@@ -27,19 +33,20 @@ from pathlib import Path
 
 from config import PipelineConfig
 from plan_parser import parse_plan
-from state_machine import Phase
 from steps import (
+    run_eng_review,
+    run_explore,
     run_final_review,
     run_green,
-    run_green_fix,
     run_lint,
     run_red,
+    run_review,
     run_verify,
 )
 
 logger = logging.getLogger(__name__)
 
-PHASES = ("red", "green", "verify", "lint", "commit", "final-review")
+PHASES = ("explore", "red", "green", "verify", "lint", "review", "commit", "eng-review", "final-review")
 
 
 def _resolve_plan_path(plan_path: str, cwd: str) -> str:
@@ -69,6 +76,10 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 examples:
+  # Explore the codebase (plan-wide, no --step needed)
+  uv run --directory agent_tools/dev_cycle python run_step.py \\
+      --plan plans/foo.md --phase explore
+
   # Write failing tests for step 3
   uv run --directory agent_tools/dev_cycle python run_step.py \\
       --plan plans/foo.md --step 3 --phase red
@@ -77,11 +88,15 @@ examples:
   uv run --directory agent_tools/dev_cycle python run_step.py \\
       --plan plans/foo.md --step 3 --phase green
 
-  # Run tests for step 3
+  # LLM convention review for step 3
   uv run --directory agent_tools/dev_cycle python run_step.py \\
-      --plan plans/foo.md --step 3 --phase verify
+      --plan plans/foo.md --step 3 --phase review --review-mode agent
 
-  # Run final review on full branch diff
+  # Engineering review on full branch diff
+  uv run --directory agent_tools/dev_cycle python run_step.py \\
+      --plan plans/foo.md --phase eng-review --review-mode agent
+
+  # Final review (static + /review CLI)
   uv run --directory agent_tools/dev_cycle python run_step.py \\
       --plan plans/foo.md --phase final-review
 """,
@@ -95,7 +110,7 @@ examples:
         "--step",
         type=int,
         default=None,
-        help="Step number to operate on (required for all phases except final-review).",
+        help="Step number to operate on (required for per-step phases).",
     )
     parser.add_argument(
         "--phase",
@@ -107,6 +122,12 @@ examples:
         "--context",
         default="",
         help="Extra context for the agent (e.g. previous failure output).",
+    )
+    parser.add_argument(
+        "--review-mode",
+        choices=["static", "agent", "full"],
+        default="static",
+        help="Review depth for review/eng-review/final-review phases.",
     )
     return parser
 
@@ -126,29 +147,66 @@ async def _run_phase(args: argparse.Namespace, config: PipelineConfig) -> dict:
     step_num = args.step
     context = args.context
 
-    # final-review doesn't need a step
+    # --- Plan-wide phases (no --step needed) ---
+
+    if phase == "explore":
+        logger.info("[EXPLORE] Codebase research")
+        explore_result = await run_explore(plan=plan, config=config)
+        return {
+            "phase": "explore",
+            "context_length": len(explore_result.context),
+            "cost_usd": explore_result.cost_usd,
+        }
+
+    if phase == "eng-review":
+        logger.info("[ENG_REVIEW] Senior engineer review")
+        diff_proc = subprocess.run(
+            ["git", "diff", config.base_branch],
+            capture_output=True,
+            text=True,
+            cwd=config.cwd,
+        )
+        name_proc = subprocess.run(
+            ["git", "diff", "--name-only", config.base_branch],
+            capture_output=True,
+            text=True,
+            cwd=config.cwd,
+        )
+        changed_files = [f.strip() for f in name_proc.stdout.strip().splitlines() if f.strip()]
+        result = await run_eng_review(
+            full_diff=diff_proc.stdout,
+            changed_files=changed_files,
+            config=config,
+        )
+        return {
+            "phase": "eng-review",
+            "findings_count": len(result.findings),
+            "risk_summary": result.risk_summary,
+            "verdict": result.verdict,
+            "cost_usd": result.cost_usd,
+            "result": asdict(result),
+        }
+
     if phase == "final-review":
-        logger.info("[FINAL_REVIEW] Running static checks + /review")
-        result = run_final_review(config)
+        logger.info("[FINAL_REVIEW] Running final review")
+        result = await run_final_review(config)
         return {
             "phase": "final-review",
             "verdict": result.verdict,
-            "summary": result.summary,
-            "findings": result.findings,
+            "result": asdict(result),
         }
 
-    # All other phases require a step number
+    # --- Per-step phases (--step required) ---
+
     if step_num is None:
         logger.error("--step is required for phase '%s'", phase)
         return {"error": f"--step is required for phase '{phase}'"}
 
-    # Find the step in the plan
     step = next((s for s in plan.steps if s.number == step_num), None)
     if step is None:
         logger.error("Step %d not found in plan", step_num)
         return {"error": f"Step {step_num} not found in plan"}
 
-    # Files from prior steps
     prior_files = []
     for s in plan.steps:
         if s.number < step_num:
@@ -208,6 +266,28 @@ async def _run_phase(args: argparse.Namespace, config: PipelineConfig) -> dict:
             "step": step_num,
             "passed": lint_result.passed,
             "violations": lint_result.violations,
+        }
+
+    elif phase == "review":
+        logger.info("[REVIEW] Step %d — LLM convention review", step_num)
+        diff_proc = subprocess.run(
+            ["git", "diff", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=config.cwd,
+        )
+        review_result = await run_review(
+            diff=diff_proc.stdout,
+            changed_files=step.files,
+            config=config,
+        )
+        return {
+            "phase": "review",
+            "step": step_num,
+            "findings_count": len(review_result.findings),
+            "has_critical_or_high": review_result.has_critical_or_high,
+            "cost_usd": review_result.cost_usd,
+            "result": asdict(review_result),
         }
 
     elif phase == "commit":
@@ -277,6 +357,7 @@ def main() -> int:
     config = PipelineConfig(
         plan_path=plan_path,
         step=args.step,
+        review_mode=args.review_mode,
         cwd=cwd,
     )
 
@@ -290,7 +371,7 @@ def main() -> int:
     print(file=sys.stdout)
 
     is_error = "error" in result
-    is_failure = result.get("passed") is False
+    is_failure = result.get("passed") is False or result.get("has_critical_or_high") is True
     return 1 if (is_error or is_failure) else 0
 
 

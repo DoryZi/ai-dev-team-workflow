@@ -3,7 +3,8 @@
 Applies simple rules based on file paths and diff content to score
 risk across three categories: security, breaking_changes, rollback.
 
-Used during the FINAL_REVIEW phase to provide context to /review.
+Used as a mechanical floor for risk assessment. LLM review agents
+can upgrade these scores but not downgrade them.
 """
 from __future__ import annotations
 

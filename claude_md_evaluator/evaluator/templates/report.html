@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLAUDE.md Evaluation Report</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-card: #ffffff;
+    --text: #1a1a2e;
+    --text-secondary: #555;
+    --border: #dee2e6;
+    --green: #28a745;
+    --green-bg: #d4edda;
+    --amber: #f0ad4e;
+    --amber-bg: #fff3cd;
+    --red: #dc3545;
+    --red-bg: #f8d7da;
+    --accent: #4a6cf7;
+    --shadow: rgba(0,0,0,0.08);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-card: #1c2128;
+      --text: #e6edf3;
+      --text-secondary: #8b949e;
+      --border: #30363d;
+      --green: #3fb950;
+      --green-bg: #0d2818;
+      --amber: #d29922;
+      --amber-bg: #2d2000;
+      --red: #f85149;
+      --red-bg: #3d1214;
+      --accent: #58a6ff;
+      --shadow: rgba(0,0,0,0.3);
+    }
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 0;
+  }
+
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+  }
+
+  /* Header */
+  .report-header {
+    text-align: center;
+    padding: 2rem 0;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 2rem;
+  }
+
+  .report-header h1 {
+    font-size: 1.8rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .report-header .timestamp {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .aggregate-score {
+    display: inline-block;
+    font-size: 3rem;
+    font-weight: 700;
+    padding: 0.3rem 1rem;
+    border-radius: 12px;
+    margin-top: 1rem;
+  }
+
+  /* Score summary grid */
+  .score-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .score-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.2rem;
+    text-align: center;
+    box-shadow: 0 1px 3px var(--shadow);
+  }
+
+  .score-card .label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.4rem;
+  }
+
+  .score-card .value {
+    font-size: 1.8rem;
+    font-weight: 700;
+  }
+
+  /* Color classes */
+  .score-green { color: var(--green); }
+  .score-amber { color: var(--amber); }
+  .score-red { color: var(--red); }
+  .bg-green { background: var(--green-bg); color: var(--green); }
+  .bg-amber { background: var(--amber-bg); color: var(--amber); }
+  .bg-red { background: var(--red-bg); color: var(--red); }
+
+  /* Problem sections */
+  .problem-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 1px 3px var(--shadow);
+    overflow: hidden;
+  }
+
+  .problem-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.2rem;
+    cursor: pointer;
+    user-select: none;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .problem-header:hover {
+    opacity: 0.85;
+  }
+
+  .problem-header h2 {
+    font-size: 1.15rem;
+    margin: 0;
+  }
+
+  .problem-header .badge {
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.2rem 0.7rem;
+    border-radius: 20px;
+  }
+
+  .problem-header .toggle-icon {
+    font-size: 1.2rem;
+    margin-left: 0.5rem;
+    transition: transform 0.2s;
+  }
+
+  .problem-header .toggle-icon.collapsed {
+    transform: rotate(-90deg);
+  }
+
+  .problem-body {
+    padding: 1.2rem;
+  }
+
+  .problem-body.hidden {
+    display: none;
+  }
+
+  /* Sub-sections */
+  .subsection {
+    margin-bottom: 1.2rem;
+  }
+
+  .subsection:last-child {
+    margin-bottom: 0;
+  }
+
+  .subsection h3 {
+    font-size: 1rem;
+    margin-bottom: 0.6rem;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.3rem;
+  }
+
+  .subsection .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.3rem 0;
+    font-size: 0.9rem;
+  }
+
+  .subsection .detail-row .detail-label {
+    color: var(--text-secondary);
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    margin-top: 0.5rem;
+  }
+
+  th, td {
+    padding: 0.5rem 0.7rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  th {
+    background: var(--bg-secondary);
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+  }
+
+  /* Test list */
+  .test-list {
+    list-style: none;
+    padding: 0;
+    margin-top: 0.5rem;
+  }
+
+  .test-list li {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.88rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .test-list li:last-child {
+    border-bottom: none;
+  }
+
+  .indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .indicator.pass { background: var(--green); }
+  .indicator.fail { background: var(--red); }
+
+  .test-error {
+    display: none;
+    padding: 0.4rem 0.7rem;
+    margin-top: 0.3rem;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    font-size: 0.82rem;
+    color: var(--red);
+    font-family: monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .test-item {
+    cursor: pointer;
+  }
+
+  .test-item.expanded .test-error {
+    display: block;
+  }
+
+  /* LLM dimension cards */
+  .dim-card {
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .dim-card .dim-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.3rem;
+  }
+
+  .dim-card .dim-name {
+    font-weight: 600;
+  }
+
+  .dim-card .dim-reasoning {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+
+  /* Footer */
+  .report-footer {
+    border-top: 2px solid var(--border);
+    padding-top: 1.5rem;
+    margin-top: 2rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  @media (max-width: 600px) {
+    .container { padding: 1rem; }
+    .aggregate-score { font-size: 2.2rem; }
+    .score-grid { grid-template-columns: 1fr 1fr; }
+    .report-footer { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="report-header">
+    <h1>{{ report.get("claude_md_file", "CLAUDE.md") }} &mdash; Evaluation Report</h1>
+    <div class="timestamp">{{ report.get("timestamp", "N/A") }}</div>
+    {% set agg = report.get("aggregate_score", 0) %}
+    <div class="aggregate-score {{ score_bg_class(agg) }}">{{ "%.0f"|format(agg * 100) }}%</div>
+  </div>
+
+  <!-- Score summary grid -->
+  <div class="score-grid">
+    {% set scores = report.get("aggregate_scores", {}) %}
+    {% for key, label in [("generation", "Generation"), ("static_analysis", "Static Analysis"), ("tests", "Tests"), ("llm_judge", "LLM Judge")] %}
+    {% set val = scores.get(key) %}
+    <div class="score-card">
+      <div class="label">{{ label }}</div>
+      {% if val is not none %}
+      <div class="value {{ score_color_class(val) }}">{{ "%.0f"|format(val * 100) }}%</div>
+      {% else %}
+      <div class="value" style="color:var(--text-secondary);">N/A</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Per-problem sections -->
+  {% for problem in report.get("problems", []) %}
+  <div class="problem-section">
+    <div class="problem-header" onclick="toggleProblem(this)">
+      <div style="display:flex;align-items:center;gap:0.7rem;">
+        <h2>{{ problem.get("name", "Unknown") }}</h2>
+        {% set pscore = problem.get("combined_score", 0) %}
+        <span class="badge {{ score_bg_class(pscore) }}">{{ "%.0f"|format(pscore * 100) }}%</span>
+      </div>
+      <span class="toggle-icon">&#9660;</span>
+    </div>
+    <div class="problem-body">
+
+      <!-- Generation -->
+      {% set gen = problem.get("generation", {}) %}
+      {% if gen %}
+      <div class="subsection">
+        <h3>Generation</h3>
+        <div class="detail-row">
+          <span class="detail-label">Status</span>
+          <span class="{{ 'score-green' if gen.get('success') else 'score-red' }}">
+            {{ "Success" if gen.get("success") else "Failed" }}
+          </span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Duration</span>
+          <span>{{ "%.1f"|format(gen.get("duration_seconds", 0)) }}s</span>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Static Analysis -->
+      {% set sa = problem.get("static_analysis", {}) %}
+      {% if sa %}
+      <div class="subsection">
+        <h3>Static Analysis</h3>
+        <div class="detail-row">
+          <span class="detail-label">Overall Score</span>
+          <span class="{{ score_color_class(sa.get('overall_score', 0)) }}">
+            {{ "%.0f"|format(sa.get("overall_score", 0) * 100) }}%
+          </span>
+        </div>
+        {% set checks = sa.get("checks", []) %}
+        {% if checks %}
+        <table>
+          <thead>
+            <tr><th>Rule</th><th>Score</th><th>Details</th></tr>
+          </thead>
+          <tbody>
+            {% for chk in checks %}
+            <tr>
+              <td>{{ chk.get("rule_id", "") }}</td>
+              <td class="{{ score_color_class(chk.get('score', 0)) }}">{{ "%.0f"|format(chk.get("score", 0) * 100) }}%</td>
+              <td>{{ chk.get("details", "") }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Test Results -->
+      {% set tr = problem.get("test_results", {}) %}
+      {% if tr %}
+      <div class="subsection">
+        <h3>Test Results</h3>
+        <div class="detail-row">
+          <span class="detail-label">Passed</span>
+          <span class="{{ 'score-green' if tr.get('passed_tests', 0) == tr.get('total_tests', 0) and tr.get('total_tests', 0) > 0 else 'score-red' }}">
+            {{ tr.get("passed_tests", 0) }} / {{ tr.get("total_tests", 0) }}
+          </span>
+        </div>
+        {% set tests = tr.get("test_results", []) %}
+        {% if tests %}
+        <ul class="test-list">
+          {% for t in tests %}
+          <li>
+            <div class="test-item{% if not t.get('passed') and t.get('error_message') %} has-error{% endif %}" onclick="toggleTest(this)">
+              <span class="indicator {{ 'pass' if t.get('passed') else 'fail' }}"></span>
+              <span>{{ t.get("name", "unknown") }}</span>
+              {% if not t.get("passed") and t.get("error_message") %}
+              <div class="test-error">{{ t.get("error_message", "") }}</div>
+              {% endif %}
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- LLM Judge -->
+      {% set lj = problem.get("llm_judge", {}) %}
+      {% if lj and lj.get("dimensions") %}
+      <div class="subsection">
+        <h3>LLM Judge</h3>
+        <div class="detail-row">
+          <span class="detail-label">Overall Score</span>
+          <span class="{{ score_color_class(lj.get('overall_score', 0)) }}">
+            {{ "%.0f"|format(lj.get("overall_score", 0) * 100) }}%
+          </span>
+        </div>
+        {% if lj.get("summary") %}
+        <p style="font-size:0.9rem;margin:0.5rem 0;color:var(--text-secondary);">{{ lj.get("summary") }}</p>
+        {% endif %}
+        {% for dim in lj.get("dimensions", []) %}
+        <div class="dim-card">
+          <div class="dim-header">
+            <span class="dim-name">{{ dim.get("name", "") }}</span>
+            <span class="{{ score_color_class(dim.get('score', 0)) }}">{{ "%.0f"|format(dim.get("score", 0) * 100) }}%</span>
+          </div>
+          {% if dim.get("reasoning") %}
+          <div class="dim-reasoning">{{ dim.get("reasoning", "") }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+  {% endfor %}
+
+  {% if not report.get("problems") %}
+  <div class="problem-section">
+    <div class="problem-body" style="text-align:center;color:var(--text-secondary);padding:2rem;">
+      No problem results available.
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Footer -->
+  <div class="report-footer">
+    {% set meta = report.get("metadata", {}) %}
+    <span>Version: {{ meta.get("version", "N/A") }}</span>
+    <span>Model: {{ meta.get("model", "N/A") }}</span>
+    <span>Total Duration: {{ "%.1f"|format(meta.get("total_duration_seconds", 0)) }}s</span>
+  </div>
+
+</div>
+
+<script>
+function toggleProblem(header) {
+  var body = header.nextElementSibling;
+  var icon = header.querySelector('.toggle-icon');
+  if (body.classList.contains('hidden')) {
+    body.classList.remove('hidden');
+    icon.classList.remove('collapsed');
+  } else {
+    body.classList.add('hidden');
+    icon.classList.add('collapsed');
+  }
+}
+
+function toggleTest(el) {
+  el.classList.toggle('expanded');
+}
+</script>
+</body>
+</html>

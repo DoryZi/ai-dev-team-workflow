@@ -1,0 +1,100 @@
+# Project configuration for claude_md_evaluator
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "claude-md-evaluator"
+version = "0.1.0"
+description = "Evaluation framework for CLAUDE.md files using coding problems and LLM-as-judge scoring"
+authors = [
+    {name = "AI Dev Team Workflow", email = "noreply@example.com"},
+]
+license = {text = "MIT"}
+requires-python = ">=3.11"
+keywords = ["claude", "evaluation", "llm", "coding", "assessment"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+dependencies = [
+    "click>=8.0.0",
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+    "pyyaml>=6.0",
+    "jinja2>=3.0.0",
+    "anthropic>=0.25.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "mypy>=1.0.0",
+    "black>=23.0.0",
+    "isort>=5.0.0",
+]
+
+[project.scripts]
+claude-md-eval = "evaluator.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ai-dev-team-workflow/claude-md-evaluator"
+Repository = "https://github.com/ai-dev-team-workflow/claude-md-evaluator"
+Issues = "https://github.com/ai-dev-team-workflow/claude-md-evaluator/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["evaluator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--verbose",
+]
+
+[tool.coverage.run]
+source = ["evaluator"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+select = ["E", "F", "W", "C90", "I", "N", "D", "UP", "B", "A", "C4", "ICN", "PIE", "PYI", "PT", "Q", "RET", "SIM", "TID", "TCH", "PGH", "PLC", "PLE", "PLR", "PLW", "TRY", "NPY", "RUF"]
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D107", "PLR0913"]
+
+[tool.ruff.pydocstyle]
+convention = "google"
+
+[tool.isort]
+profile = "black"
+line_length = 100

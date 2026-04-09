@@ -3,6 +3,8 @@
 Usage:
     uv run --directory agent_tools/dev_cycle python run.py --plan plans/foo.md
     uv run --directory agent_tools/dev_cycle python run.py --plan plans/foo.md --step 3
+    uv run --directory agent_tools/dev_cycle python run.py --plan plans/foo.md --review-mode agent
+    uv run --directory agent_tools/dev_cycle python run.py --plan plans/foo.md --no-explore
     uv run --directory agent_tools/dev_cycle python run.py --plan plans/foo.md --dry-run
 
 Exit code 0 = success, 1 = failure.
@@ -58,6 +60,9 @@ def _build_config(args: argparse.Namespace) -> PipelineConfig:
         step=args.step,
         max_verify_attempts=args.max_verify,
         max_lint_attempts=args.max_lint,
+        max_review_iterations=args.max_review,
+        review_mode=args.review_mode,
+        skip_explore=args.no_explore,
         dry_run=args.dry_run,
         cwd=cwd,
     )
@@ -82,6 +87,15 @@ examples:
 
   # Override limits
   uv run --directory agent_tools/dev_cycle python run.py --plan plans/foo.md --max-verify 5
+
+  # LLM review mode
+  uv run --directory agent_tools/dev_cycle python run.py --plan plans/foo.md --review-mode agent
+
+  # Full mode (static + LLM review)
+  uv run --directory agent_tools/dev_cycle python run.py --plan plans/foo.md --review-mode full
+
+  # Skip codebase exploration
+  uv run --directory agent_tools/dev_cycle python run.py --plan plans/foo.md --no-explore
 
   # Dry run (validate plan only)
   uv run --directory agent_tools/dev_cycle python run.py --plan plans/foo.md --dry-run
@@ -111,6 +125,24 @@ examples:
         help="Max lint/format fix cycles per step (default: 3).",
     )
     parser.add_argument(
+        "--max-review",
+        type=int,
+        default=2,
+        help="Max LLM review retry cycles per step (default: 2).",
+    )
+    parser.add_argument(
+        "--review-mode",
+        choices=["static", "agent", "full"],
+        default="static",
+        help="Review depth: static (default), agent (LLM), or full (both).",
+    )
+    parser.add_argument(
+        "--no-explore",
+        action="store_true",
+        default=False,
+        help="Skip the codebase exploration phase.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         default=False,
@@ -129,12 +161,21 @@ def _print_summary(result: PipelineResult) -> None:
     print(f"Pipeline Status: {result.status.upper()}", file=sys.stderr)
     print(f"{'=' * 60}", file=sys.stderr)
 
+    if result.explore:
+        print(
+            f"  Explore: {len(result.explore.context)} chars, cost=${result.explore.cost_usd:.4f}",
+            file=sys.stderr,
+        )
+
     for step in result.steps:
         verify_status = "PASS" if step.verify and step.verify.passed else "FAIL"
         lint_status = "PASS" if step.lint and step.lint.passed else "FAIL"
+        review_status = ""
+        if step.review:
+            review_status = f" review={'PASS' if not step.review.has_critical_or_high else 'FAIL'}"
         print(
-            f"  Step {step.step_number}: verify={verify_status} lint={lint_status} "
-            f"attempts={step.attempts} cost=${step.cost_usd:.4f}",
+            f"  Step {step.step_number}: verify={verify_status} lint={lint_status}"
+            f"{review_status} attempts={step.attempts} cost=${step.cost_usd:.4f}",
             file=sys.stderr,
         )
 

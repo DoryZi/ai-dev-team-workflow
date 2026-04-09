@@ -60,8 +60,74 @@ class LintResult:
 
 
 @dataclass
-class ReviewResult:
-    """Result of the FINAL_REVIEW phase — static checks + /review.
+class ExploreResult:
+    """Result of the EXPLORE phase — codebase exploration.
+
+    Attributes:
+        context: Markdown text with exploration findings.
+        cost_usd: Agent SDK cost for this phase.
+        saved_path: Path where exploration was saved, or None.
+    """
+
+    context: str = ""
+    cost_usd: float = 0.0
+    saved_path: str | None = None
+
+
+@dataclass
+class ReviewFinding:
+    """A single finding from an LLM review agent.
+
+    Attributes:
+        severity: CRITICAL, HIGH, MEDIUM, or LOW.
+        file: File path where the issue was found.
+        line: Line number, or None if file-wide.
+        title: Short description of the issue.
+        detail: Explanation and suggested fix.
+    """
+
+    severity: str = ""
+    file: str = ""
+    line: int | None = None
+    title: str = ""
+    detail: str = ""
+
+
+@dataclass
+class AgentReviewResult:
+    """Result of per-step LLM convention review.
+
+    Attributes:
+        findings: List of review findings.
+        has_critical_or_high: Whether any CRITICAL or HIGH findings exist.
+        cost_usd: Agent SDK cost for this phase.
+    """
+
+    findings: list[ReviewFinding] = field(default_factory=list)
+    has_critical_or_high: bool = False
+    cost_usd: float = 0.0
+
+
+@dataclass
+class EngReviewResult:
+    """Result of final LLM engineering review.
+
+    Attributes:
+        findings: List of review findings.
+        risk_summary: Free-form risk assessment from the LLM.
+        verdict: APPROVE, APPROVE_WITH_FIXES, or REQUEST_CHANGES.
+        cost_usd: Agent SDK cost for this phase.
+    """
+
+    findings: list[ReviewFinding] = field(default_factory=list)
+    risk_summary: str = ""
+    verdict: str = ""
+    cost_usd: float = 0.0
+
+
+@dataclass
+class StaticReviewResult:
+    """Result of the static-only FINAL_REVIEW phase.
 
     Attributes:
         findings: List of review finding dicts from /review.
@@ -96,6 +162,7 @@ class StepResult:
     green: GreenResult | None = None
     verify: VerifyResult | None = None
     lint: LintResult | None = None
+    review: AgentReviewResult | None = None
     committed: bool = False
     attempts: int = 0
     cost_usd: float = 0.0
@@ -116,7 +183,8 @@ class PipelineResult:
 
     status: str = "failed"
     steps: list[StepResult] = field(default_factory=list)
-    final_review: ReviewResult | None = None
+    explore: ExploreResult | None = None
+    final_review: StaticReviewResult | EngReviewResult | None = None
     total_cost_usd: float = 0.0
     failure_detail: str | None = None
     pr_url: str | None = None

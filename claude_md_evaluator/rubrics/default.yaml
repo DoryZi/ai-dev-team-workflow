@@ -1,0 +1,40 @@
+dimensions:
+  readability:
+    weight: 0.25
+    description: "Code is clear, well-structured, and easy to follow"
+    criteria:
+      - "Meaningful variable and function names"
+      - "Logical code organization"
+      - "Appropriate use of whitespace and formatting"
+
+  error_handling:
+    weight: 0.20
+    description: "Errors are handled properly with specific exceptions"
+    criteria:
+      - "Specific exception types are caught"
+      - "No silent failures (bare except/pass)"
+      - "Meaningful error messages"
+
+  efficiency:
+    weight: 0.20
+    description: "Code uses efficient algorithms and data structures"
+    criteria:
+      - "Appropriate data structure choices"
+      - "No unnecessary iterations or copies"
+      - "Reasonable time/space complexity"
+
+  correctness:
+    weight: 0.20
+    description: "Code handles edge cases and corner cases"
+    criteria:
+      - "Edge cases are considered"
+      - "Input validation where appropriate"
+      - "Consistent return types"
+
+  best_practices:
+    weight: 0.15
+    description: "Follows Python best practices and idioms"
+    criteria:
+      - "Uses Python idioms (comprehensions, context managers, etc.)"
+      - "Follows PEP 8 conventions"
+      - "Appropriate use of standard library"
