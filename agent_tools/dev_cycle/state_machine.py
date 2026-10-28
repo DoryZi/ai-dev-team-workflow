@@ -12,19 +12,17 @@ class Phase(Enum):
     """Pipeline phases in execution order."""
 
     EXPLORE = "explore"
-    RED = "red"
-    GREEN = "green"
+    IMPLEMENT = "implement"
     VERIFY = "verify"
-    LINT = "lint"
     REVIEW = "review"
     COMMIT = "commit"
     FINAL_REVIEW = "final_review"
 
 
 # Per-step phase order (EXPLORE and FINAL_REVIEW run once, not per-step).
-# REVIEW is included in the sequence but the pipeline skips it when
-# review_mode is "static".
-_STEP_PHASES = [Phase.RED, Phase.GREEN, Phase.VERIFY, Phase.LINT, Phase.REVIEW, Phase.COMMIT]
+# VERIFY includes lint (ruff format + check) and full-suite pytest.
+# REVIEW loops back to IMPLEMENT if CRITICAL/HIGH findings exist.
+_STEP_PHASES = [Phase.IMPLEMENT, Phase.VERIFY, Phase.REVIEW, Phase.COMMIT]
 
 
 def next_phase(current: Phase) -> Phase | None:
@@ -56,7 +54,7 @@ def is_retryable(phase: Phase) -> bool:
     Returns:
         True if the phase can be retried on failure.
     """
-    return phase in (Phase.VERIFY, Phase.LINT, Phase.REVIEW)
+    return phase in (Phase.VERIFY, Phase.REVIEW)
 
 
 def phase_from_str(name: str) -> Phase:

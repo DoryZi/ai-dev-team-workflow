@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<!--
+  Plan HTML template — used by the /plan skill (Stage 4).
+  Self-contained: all CSS inline, no external scripts or fonts, opens offline.
+  Replace every {{PLACEHOLDER}}. The diagram is a hand-authored inline <svg> —
+  do NOT pull in mermaid or any CDN; draw the boxes/arrows for THIS plan.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{FEATURE_TITLE}} — Plan</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --ink: #e6e8ec; --muted: #9aa3b2;
+    --line: #2a2f3a; --accent: #5b9dff; --ok: #3fb950; --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 40px 24px 80px; }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 28px; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  h2 { font-size: 19px; margin: 36px 0 12px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px; margin-bottom: 22px; }
+  ul.ac { list-style: none; padding: 0; margin: 0; }
+  ul.ac li { padding: 6px 0 6px 26px; position: relative; }
+  ul.ac li::before { content: "☐"; position: absolute; left: 0; color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  code, td.cmd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  td.cmd { color: var(--accent); white-space: pre-wrap; word-break: break-word; }
+  .step { border-left: 3px solid var(--accent); padding-left: 16px; margin: 18px 0; }
+  .step h3 { margin: 0 0 4px; font-size: 16px; }
+  .step .tags { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .step .tags span { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; margin-right: 6px; }
+  .diagram { display: flex; justify-content: center; padding: 8px 0; }
+  .diagram svg { max-width: 100%; height: auto; }
+  /* SVG defaults the hand-authored diagram can rely on */
+  .node { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; rx: 8; }
+  .node-label { fill: var(--ink); font: 13px sans-serif; text-anchor: middle; dominant-baseline: middle; }
+  .edge { stroke: var(--muted); stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+  .edge-label { fill: var(--muted); font: 11px sans-serif; text-anchor: middle; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>{{FEATURE_TITLE}}</h1>
+    <div class="meta">Plan · {{DATE}}</div>
+  </header>
+
+  <h2>Diagram</h2>
+  <section>
+    <div class="diagram">
+      <!--
+        Hand-author the diagram for THIS plan. Use class="node"/"node-label"/"edge"/"edge-label".
+        The arrowhead marker below is reusable. Keep it to a handful of labelled nodes.
+      -->
+      <svg viewBox="0 0 720 240" role="img" aria-label="{{DIAGRAM_ALT}}">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#9aa3b2" />
+          </marker>
+        </defs>
+        {{DIAGRAM_SVG_BODY}}
+      </svg>
+    </div>
+  </section>
+
+  <h2>Acceptance Criteria</h2>
+  <section>
+    <ul class="ac">
+      {{ACCEPTANCE_CRITERIA_LIST}}
+      <!-- e.g. <li>Adding a task with a valid title creates it in the store</li> -->
+    </ul>
+  </section>
+
+  <h2>Verification</h2>
+  <section>
+    <table>
+      <thead><tr><th>AC</th><th>Method</th><th>Command</th><th>Expected result</th></tr></thead>
+      <tbody>
+        {{VERIFICATION_ROWS}}
+        <!-- e.g. <tr><td>AC 1</td><td>unit test</td><td class="cmd">uv run ... pytest ...</td><td>exit 0, asserts pass</td></tr> -->
+      </tbody>
+    </table>
+  </section>
+
+  <h2>Implementation Steps</h2>
+  <section>
+    {{STEPS}}
+    <!-- e.g.
+    <div class="step">
+      <h3>Step 1 — Title</h3>
+      <p>Description of what this step accomplishes.</p>
+      <div class="tags"><span>Files: path/to/file.py</span><span>Test: unit</span><span>AC 1</span></div>
+    </div>
+    -->
+  </section>
+</div>
+</body>
+</html>

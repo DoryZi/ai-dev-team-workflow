@@ -4,29 +4,23 @@ from dataclasses import dataclass, field
 
 
 @dataclass
-class RedResult:
-    """Result of the RED phase — test-eng writes failing tests.
+class ImplementResult:
+    """Result of the IMPLEMENT phase — single agent writes code and tests.
+
+    Combines what RED and GREEN used to produce separately: both test files
+    and production code changes in one session.
 
     Attributes:
-        test_files: Paths to test files created by test-eng.
+        test_files: Paths to test files created or modified.
+        changed_files: Paths to production files created or modified.
         cost_usd: Agent SDK cost for this phase.
+        agent_output: Full agent text output for vault persistence.
     """
 
     test_files: list[str] = field(default_factory=list)
-    cost_usd: float = 0.0
-
-
-@dataclass
-class GreenResult:
-    """Result of the GREEN phase — SDE implements production code.
-
-    Attributes:
-        changed_files: Paths to files created or modified by SDE.
-        cost_usd: Agent SDK cost for this phase.
-    """
-
     changed_files: list[str] = field(default_factory=list)
     cost_usd: float = 0.0
+    agent_output: str = ""
 
 
 @dataclass
@@ -44,19 +38,6 @@ class VerifyResult:
     num_tests: int = 0
     num_failures: int = 0
     failures: list[str] = field(default_factory=list)
-
-
-@dataclass
-class LintResult:
-    """Result of the LINT phase — ruff format + ruff check.
-
-    Attributes:
-        passed: Whether lint checks passed (no violations).
-        violations: List of lint violation descriptions.
-    """
-
-    passed: bool = False
-    violations: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -147,10 +128,9 @@ class StepResult:
     Attributes:
         step_number: The step number from the plan.
         title: The step title from the plan.
-        red: Result of the RED phase, or None if not run.
-        green: Result of the GREEN phase, or None if not run.
-        verify: Result of the VERIFY phase, or None if not run.
-        lint: Result of the LINT phase, or None if not run.
+        implement: Result of the IMPLEMENT phase, or None if not run.
+        verify: Result of the VERIFY phase (lint + pytest), or None if not run.
+        review: Result of the REVIEW phase, or None if not run.
         committed: Whether the step was committed to git.
         attempts: Number of verify retry attempts used.
         cost_usd: Total agent SDK cost for this step.
@@ -158,10 +138,8 @@ class StepResult:
 
     step_number: int = 0
     title: str = ""
-    red: RedResult | None = None
-    green: GreenResult | None = None
+    implement: ImplementResult | None = None
     verify: VerifyResult | None = None
-    lint: LintResult | None = None
     review: AgentReviewResult | None = None
     committed: bool = False
     attempts: int = 0

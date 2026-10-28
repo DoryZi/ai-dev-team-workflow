@@ -1,13 +1,13 @@
-"""Decomposed single-phase runner for the TDD dev-cycle.
+"""Decomposed single-phase runner for the dev-cycle.
 
 Runs one phase of one step — used by the /dev-cycle Claude Code skill
 for interactive, decomposed execution.
 
 Usage:
     uv run --directory agent_tools/dev_cycle python run_step.py \
-        --plan plans/foo.md --step 3 --phase red
+        --plan plans/foo.md --step 3 --phase implement
     uv run --directory agent_tools/dev_cycle python run_step.py \
-        --plan plans/foo.md --step 3 --phase green --context "previous failures..."
+        --plan plans/foo.md --step 3 --phase verify
     uv run --directory agent_tools/dev_cycle python run_step.py \
         --plan plans/foo.md --phase explore
     uv run --directory agent_tools/dev_cycle python run_step.py \
@@ -33,20 +33,41 @@ from pathlib import Path
 
 from config import PipelineConfig
 from plan_parser import parse_plan
+
 from steps import (
     run_eng_review,
     run_explore,
     run_final_review,
-    run_green,
-    run_lint,
-    run_red,
+    run_implement,
     run_review,
     run_verify,
 )
+from vault import load_context_for_step, plan_slug, RunManifest
 
 logger = logging.getLogger(__name__)
 
-PHASES = ("explore", "red", "green", "verify", "lint", "review", "commit", "eng-review", "final-review")
+PHASES = ("explore", "implement", "verify", "review", "commit", "eng-review", "final-review")
+
+
+def _detect_repo_root() -> str:
+    """Auto-detect the repository root via git.
+
+    Returns:
+        Absolute path to the repo root.
+
+    Raises:
+        RuntimeError: If git rev-parse fails.
+    """
+    proc = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"Failed to detect repo root via git: {proc.stderr.strip()}"
+        )
+    return proc.stdout.strip()
 
 
 def _resolve_plan_path(plan_path: str, cwd: str) -> str:
@@ -80,13 +101,13 @@ examples:
   uv run --directory agent_tools/dev_cycle python run_step.py \\
       --plan plans/foo.md --phase explore
 
-  # Write failing tests for step 3
+  # Implement step 3 (writes code + tests)
   uv run --directory agent_tools/dev_cycle python run_step.py \\
-      --plan plans/foo.md --step 3 --phase red
+      --plan plans/foo.md --step 3 --phase implement
 
-  # Implement step 3
+  # Verify step 3 (lint + pytest)
   uv run --directory agent_tools/dev_cycle python run_step.py \\
-      --plan plans/foo.md --step 3 --phase green
+      --plan plans/foo.md --step 3 --phase verify
 
   # LLM convention review for step 3
   uv run --directory agent_tools/dev_cycle python run_step.py \\
@@ -128,6 +149,16 @@ examples:
         choices=["static", "agent", "full"],
         default="static",
         help="Review depth for review/eng-review/final-review phases.",
+    )
+    parser.add_argument(
+        "--cwd",
+        default=None,
+        help="Repository root directory (default: auto-detect via git).",
+    )
+    parser.add_argument(
+        "--vault-run",
+        default=None,
+        help="Vault run ID (timestamp) to load context from. Enables vault context injection.",
     )
     return parser
 
@@ -212,43 +243,49 @@ async def _run_phase(args: argparse.Namespace, config: PipelineConfig) -> dict:
         if s.number < step_num:
             prior_files.extend(s.files)
 
-    if phase == "red":
-        logger.info("[RED] Step %d — writing tests", step_num)
-        red_result = await run_red(
-            step=step,
-            plan_text=plan.raw_text,
-            config=config,
-            prior_files=prior_files,
-        )
-        return {
-            "phase": "red",
-            "step": step_num,
-            "test_files": red_result.test_files,
-            "cost_usd": red_result.cost_usd,
-        }
+    # --- Load vault context if available ---
+    vault_context = ""
+    vault_run_id = getattr(args, "vault_run", None)
+    if vault_run_id and step_num:
+        try:
+            manifest = RunManifest(
+                plan_slug=plan_slug(config.plan_path),
+                run_id=vault_run_id,
+                plan_path=config.plan_path,
+            )
+            vault_context = load_context_for_step(
+                plan_path=config.plan_path,
+                current_manifest=manifest,
+                step_number=step_num,
+            )
+            if vault_context:
+                logger.info("[VAULT] Loaded %d chars of context", len(vault_context))
+        except Exception as exc:
+            logger.warning("[VAULT] Failed to load context: %s", exc)
 
-    elif phase == "green":
-        logger.info("[GREEN] Step %d — implementing", step_num)
-        test_files = [f for f in step.files if "test" in f.lower()]
-        green_result = await run_green(
+    if phase == "implement":
+        logger.info("[IMPLEMENT] Step %d — writing code and tests", step_num)
+        implement_result = await run_implement(
             step=step,
             plan_text=plan.raw_text,
-            test_files=test_files,
             config=config,
             prior_files=prior_files,
-            extra_context=context,
+            vault_context=vault_context,
         )
         return {
-            "phase": "green",
+            "phase": "implement",
             "step": step_num,
-            "changed_files": green_result.changed_files,
-            "cost_usd": green_result.cost_usd,
+            "test_files": implement_result.test_files,
+            "changed_files": implement_result.changed_files,
+            "cost_usd": implement_result.cost_usd,
         }
 
     elif phase == "verify":
-        logger.info("[VERIFY] Step %d — running tests", step_num)
+        logger.info("[VERIFY] Step %d — lint + tests", step_num)
         test_dir = _find_test_dir(step.files, config.cwd)
-        verify_result = run_verify(test_dir=test_dir, config=config)
+        verify_result = run_verify(
+            test_dir=test_dir, config=config, changed_files=step.files,
+        )
         return {
             "phase": "verify",
             "step": step_num,
@@ -256,16 +293,6 @@ async def _run_phase(args: argparse.Namespace, config: PipelineConfig) -> dict:
             "num_tests": verify_result.num_tests,
             "num_failures": verify_result.num_failures,
             "failures": verify_result.failures,
-        }
-
-    elif phase == "lint":
-        logger.info("[LINT] Step %d — format & lint", step_num)
-        lint_result = run_lint(changed_files=step.files, config=config)
-        return {
-            "phase": "lint",
-            "step": step_num,
-            "passed": lint_result.passed,
-            "violations": lint_result.violations,
         }
 
     elif phase == "review":
@@ -351,7 +378,11 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
 
-    cwd = str(Path(__file__).resolve().parent.parent.parent)
+    if args.cwd:
+        cwd = str(Path(args.cwd).resolve())
+    else:
+        cwd = _detect_repo_root()
+
     plan_path = _resolve_plan_path(args.plan, cwd)
 
     config = PipelineConfig(

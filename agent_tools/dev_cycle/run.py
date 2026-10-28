@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import json
 import logging
+import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -43,6 +44,27 @@ def _resolve_plan_path(plan_path: str, cwd: str) -> str:
     return str(p.resolve())
 
 
+def _detect_repo_root() -> str:
+    """Auto-detect the repository root via git.
+
+    Returns:
+        Absolute path to the repo root.
+
+    Raises:
+        RuntimeError: If git rev-parse fails.
+    """
+    proc = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"Failed to detect repo root via git: {proc.stderr.strip()}"
+        )
+    return proc.stdout.strip()
+
+
 def _build_config(args: argparse.Namespace) -> PipelineConfig:
     """Build a PipelineConfig from parsed CLI arguments.
 
@@ -52,17 +74,22 @@ def _build_config(args: argparse.Namespace) -> PipelineConfig:
     Returns:
         Configured PipelineConfig instance.
     """
-    cwd = str(Path(__file__).resolve().parent.parent.parent)
+    if args.cwd:
+        cwd = str(Path(args.cwd).resolve())
+    else:
+        cwd = _detect_repo_root()
+
     plan_path = _resolve_plan_path(args.plan, cwd)
 
     return PipelineConfig(
         plan_path=plan_path,
         step=args.step,
         max_verify_attempts=args.max_verify,
-        max_lint_attempts=args.max_lint,
         max_review_iterations=args.max_review,
         review_mode=args.review_mode,
         skip_explore=args.no_explore,
+        parallel=args.parallel,
+        use_oauth=args.use_oauth,
         dry_run=args.dry_run,
         cwd=cwd,
     )
@@ -119,12 +146,6 @@ examples:
         help="Max verify retry attempts per step (default: 3).",
     )
     parser.add_argument(
-        "--max-lint",
-        type=int,
-        default=3,
-        help="Max lint/format fix cycles per step (default: 3).",
-    )
-    parser.add_argument(
         "--max-review",
         type=int,
         default=2,
@@ -141,6 +162,23 @@ examples:
         action="store_true",
         default=False,
         help="Skip the codebase exploration phase.",
+    )
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        default=False,
+        help="Run independent steps concurrently within parallel groups.",
+    )
+    parser.add_argument(
+        "--use-oauth",
+        action="store_true",
+        default=False,
+        help="Use OAuth credentials (Max subscription) instead of API credits.",
+    )
+    parser.add_argument(
+        "--cwd",
+        default=None,
+        help="Repository root directory (default: auto-detect via git).",
     )
     parser.add_argument(
         "--dry-run",
@@ -169,12 +207,11 @@ def _print_summary(result: PipelineResult) -> None:
 
     for step in result.steps:
         verify_status = "PASS" if step.verify and step.verify.passed else "FAIL"
-        lint_status = "PASS" if step.lint and step.lint.passed else "FAIL"
         review_status = ""
         if step.review:
             review_status = f" review={'PASS' if not step.review.has_critical_or_high else 'FAIL'}"
         print(
-            f"  Step {step.step_number}: verify={verify_status} lint={lint_status}"
+            f"  Step {step.step_number}: verify={verify_status}"
             f"{review_status} attempts={step.attempts} cost=${step.cost_usd:.4f}",
             file=sys.stderr,
         )

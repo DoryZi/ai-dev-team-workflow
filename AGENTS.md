@@ -1,35 +1,54 @@
 # AGENTS.md — AI Dev Team Workflow
 
-Multi-agent Python development with Claude Code. Specialized agents collaborate through slash commands to plan, code, test, and review — like a real engineering team.
+Multi-agent Python development with Claude Code. Three skills cover the loop: `/plan` designs a change, `/dev-cycle` builds it, `/verify` proves it meets the plan.
 
 ## Agents
 
+### sys-arch (Systems Architect)
+
+- **Role**: Researches the codebase and designs plans for `/plan`
+- **Never touches**: Any file. Read-only
+- **Definition**: `.claude/agents/sys-arch.md`
+
 ### sde (Staff Software Engineer)
 
-- **Role**: Writes and modifies production code only — thinks like a staff engineer
-- **Never touches**: Test files — that boundary is absolute
+- **Role**: Writes and modifies production code only, thinks like a staff engineer
+- **Never touches**: Test files. That boundary is absolute
 - **Smoke test**: Runs the code end-to-end after every change to verify it works
-- **Standards**: Enforces `conventions/python-coding.md` — type hints, docstrings, pathlib, structured logging, size limits
-- **Execution**: Always uses `uv run --directory` — never venv, system Python, or bare `python3`
+- **Standards**: Enforces `conventions/python-coding.md`: type hints, docstrings, pathlib, structured logging, size limits
+- **Execution**: Always uses `uv run --directory`, never venv, system Python, or bare `python3`
 - **Definition**: `.claude/agents/sde.md`
 
 ### test-eng (Test Engineer)
 
-- **Role**: Writes and fixes test code only
-- **Never touches**: Production code — reports bugs to the user instead
+- **Role**: Writes unit and e2e tests against acceptance criteria
+- **Never touches**: Production code. Reports bugs instead
 - **Standards**: One concern per test, `tmp_path` for files, mocks only at boundaries, `pytest.raises` for exceptions
-- **Execution**: Uses `/run-tests` skill for all test execution
+- **Execution**: Uses `/run-tests` for all test runs
 - **Definition**: `.claude/agents/test-eng.md`
+
+### verifier (Verification Engineer)
+
+- **Role**: Proves a change meets the plan's acceptance criteria. Writes and runs checks in its own context, reports PASS or FAIL per criterion with command output
+- **Never touches**: Production code. Code bugs are findings, not fixes
+- **Drivers**: `claude` (default), `codex`, or `cursor`. With an external driver, the verdict still comes from commands the verifier re-ran itself
+- **Definition**: `.claude/agents/verifier.md`
+
+### Pipeline agents
+
+`/dev-cycle` runs its own headless agents (explore, implement, review, eng-review) through the Claude Agent SDK. Their prompts live in `agent_tools/dev_cycle/prompts/`.
 
 ## Skills (Slash Commands)
 
-| Skill | What it orchestrates |
-|-------|---------------------|
-| `/dev-tdd` | Full TDD cycle: plan → tests first → code → test loop → review → verify |
-| `/dev-fast` | Code-first cycle: plan → code → tests → test loop → review → verify |
+| Skill | What it does |
+|-------|--------------|
+| `/plan` | Interactive: understand → explore → acceptance criteria → verification table → steps. Saves `plans/<slug>-YYYY-MM-DD.md` and `.html` |
+| `/dev-cycle` | Automated: EXPLORE, then IMPLEMENT → VERIFY → REVIEW → COMMIT per step, then final review |
+| `/verify` | Runs the plan's verification table in a separate agent, PASS or FAIL per criterion |
 | `/run-tests` | Discovers and runs pytest across project directories |
 | `/python-reviewer` | Static analysis (ruff, mypy, black) + AI code review → DO/DON'T report |
 | `/review` | AI code review on working tree diff |
+| `/dev-tdd`, `/dev-fast` | v1 orchestrators. Deprecated, kept for reference |
 
 ## Orchestration Pattern
 
@@ -37,32 +56,37 @@ Multi-agent Python development with Claude Code. Specialized agents collaborate 
 User request
     │
     ▼
-/dev-tdd or /dev-fast (orchestrator)
+/plan (user approves each stage)
+    │   plans/<slug>-YYYY-MM-DD.md (acceptance criteria + verification table)
+    ▼
+/dev-cycle (headless pipeline: agent_tools/dev_cycle)
     │
-    ├── Phase 1: sde agent → plan (user approves)
-    ├── Phase 2: test-eng or sde → write tests or code first
-    ├── Phase 3: /run-tests → verify
-    ├── Phase 4: sde agent → self-healing loop (fix → test → repeat, max 3)
-    ├── Phase 5: /python-reviewer → review loop (fix → test → review, max 3)
-    └── Phase 6: /run-tests → final verification
+    ├── EXPLORE: research the codebase once (skip with --no-explore)
+    ├── per step: IMPLEMENT → VERIFY (lint + full pytest) → REVIEW (by --review-mode) → COMMIT
+    └── FINAL REVIEW
+    │
+    ▼
+/verify (verifier agent, fresh context)
+    └── PASS or FAIL per acceptance criterion, with evidence
 ```
 
 ## Key Boundaries
 
-- **sde** writes production code, **test-eng** writes tests — never crossed
-- **Orchestrator skills** (`/dev-tdd`, `/dev-fast`) coordinate agents — agents don't call each other
-- **All execution** goes through `uv run --directory` — no exceptions
-- **All test runs** go through `/run-tests` — agents don't run pytest directly
-- **All reviews** go through `/python-reviewer` — agents don't review their own code
+- **Planning is interactive, execution is headless.** `/plan` waits for the user; `/dev-cycle` runs on its own
+- **The orchestrator controls the flow, not the LLM.** Phase order and retries live in `agent_tools/dev_cycle/state_machine.py`
+- **Acceptance criteria are the spec.** Every criterion maps to a verification row, and `/verify` checks every row
+- **Checkers don't fix.** test-eng and verifier report production bugs instead of editing production code
+- **All execution** goes through `uv run --directory`, no exceptions
 
 ## Conventions
 
 - Agent definitions: `.claude/agents/<name>.md`
 - Skill definitions: `.claude/skills/<name>/SKILL.md`
 - Coding standards: `conventions/python-coding.md`
+- Phase rules and agent boundaries: `conventions/workflow-contract.md`
+- Pipeline architecture: `conventions/orchestration-flow.md`
 - Agent and skill templates: `conventions/agent-template.md`, `conventions/skill-template.md`
-- Unit test template: `conventions/unit-test-template.md`
-- E2E test template: `conventions/e2e-test-template.md`
+- Test templates: `conventions/unit-test-template.md`, `conventions/e2e-test-template.md`
 
 ## Adapting for Your Project
 

@@ -1,5 +1,7 @@
 # Workflow Contract
 
+> **v3 note:** this document describes the v2 pipeline. In v3, one IMPLEMENT phase writes code and tests together, replacing RED and GREEN. Current phases: EXPLORE, then IMPLEMENT → VERIFY → REVIEW → COMMIT per step, then FINAL_REVIEW (see `agent_tools/dev_cycle/state_machine.py`).
+
 The binding contract for how the TDD development pipeline operates. All agents, skills, and pipeline phases must follow these rules.
 
 For Python coding rules, see `conventions/python-coding.md`.

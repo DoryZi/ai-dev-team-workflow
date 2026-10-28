@@ -10,11 +10,19 @@ task_tracker/              ← sample app (the code being developed)
 ├── tracker.py
 └── tests/
 .claude/
-├── agents/                ← sde, test-eng, sys-arch
-└── skills/                ← plan, dev-cycle, run-tests, python-reviewer, review
+├── agents/                ← sys-arch, sde, test-eng, verifier
+└── skills/                ← plan, dev-cycle, verify, run-tests, python-reviewer, review
+agent_tools/
+└── dev_cycle/             ← /dev-cycle pipeline engine (Agent SDK) + vault/
 conventions/
-└── python-coding.md       ← full coding standards (agents reference this)
+├── python-coding.md       ← full coding standards (agents reference this)
+├── workflow-contract.md   ← phase rules and agent boundaries
+└── orchestration-flow.md  ← pipeline architecture
 ```
+
+## Workflow
+
+`/plan` → `/dev-cycle plans/<plan>.md` → `/verify plans/<plan>.md`. See `AGENTS.md` for agents, skills, and boundaries.
 
 ## Execution Rules
 

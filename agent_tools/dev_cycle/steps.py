@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -18,11 +19,12 @@ from pathlib import Path
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
 from agents import (
+    make_arch_reviewer,
     make_eng_review_agent,
     make_explore_agent,
+    make_implement_agent,
     make_review_agent,
-    make_sde_agent,
-    make_test_eng_agent,
+    make_test_reviewer,
 )
 from checks.conventions_loader import get_conventions_for_step, get_conventions_header
 from checks.risk_scorer import score_risk
@@ -33,9 +35,7 @@ from schemas import (
     AgentReviewResult,
     EngReviewResult,
     ExploreResult,
-    GreenResult,
-    LintResult,
-    RedResult,
+    ImplementResult,
     ReviewFinding,
     StaticReviewResult,
     VerifyResult,
@@ -57,6 +57,20 @@ class QueryResult:
     cost_usd: float = 0.0
 
 
+# Module-level flag set by the pipeline before running steps
+_use_oauth: bool = False
+
+
+def set_use_oauth(enabled: bool) -> None:
+    """Enable/disable OAuth mode for all agent queries.
+
+    When enabled, ANTHROPIC_API_KEY is stripped from the environment
+    so the CLI uses OAuth credentials (Max subscription) instead.
+    """
+    global _use_oauth  # noqa: PLW0603
+    _use_oauth = enabled
+
+
 async def _run_query(
     prompt: str,
     tools: list[str],
@@ -73,113 +87,88 @@ async def _run_query(
         tools: List of tool names the agent can use.
         model: Model identifier.
         cwd: Working directory for the session.
+        use_oauth: If True, strip ANTHROPIC_API_KEY so the CLI uses
+            OAuth credentials (Max subscription) instead of API credits.
 
     Returns:
         QueryResult with output text and cost.
     """
-    options = ClaudeAgentOptions(
-        allowed_tools=tools,
-        model=model,
-        cwd=cwd,
-        permission_mode="bypassPermissions",
-    )
+    stashed_key = None
+    if _use_oauth:
+        stashed_key = os.environ.pop("ANTHROPIC_API_KEY", None)
 
-    output_parts: list[str] = []
-    cost_usd = 0.0
+    try:
+        options = ClaudeAgentOptions(
+            allowed_tools=tools,
+            model=model,
+            cwd=cwd,
+            permission_mode="bypassPermissions",
+        )
 
-    async for event in query(prompt=prompt, options=options):
-        if isinstance(event, ResultMessage):
-            output_parts.append(event.result or "")
-            cost_usd = event.total_cost_usd or 0.0
+        output_parts: list[str] = []
+        cost_usd = 0.0
 
-    return QueryResult(
-        output="\n".join(output_parts),
-        cost_usd=cost_usd,
-    )
+        async for event in query(prompt=prompt, options=options):
+            if isinstance(event, ResultMessage):
+                output_parts.append(event.result or "")
+                cost_usd = event.total_cost_usd or 0.0
+
+        return QueryResult(
+            output="\n".join(output_parts),
+            cost_usd=cost_usd,
+        )
+    finally:
+        if stashed_key is not None:
+            os.environ["ANTHROPIC_API_KEY"] = stashed_key
 
 
-async def run_red(
+async def run_implement(
     step: PlanStep,
     plan_text: str,
-    config: PipelineConfig,
-    prior_files: list[str],
-    explore_context: str = "",
-) -> RedResult:
-    """Execute the RED phase — test-eng writes failing tests.
-
-    Args:
-        step: The plan step to write tests for.
-        plan_text: Full plan markdown text.
-        config: Pipeline configuration.
-        prior_files: Files from previously completed steps.
-        explore_context: Codebase exploration context from the EXPLORE phase.
-
-    Returns:
-        RedResult with test file paths and cost.
-    """
-    logger.info("[RED] Step %d — writing tests", step.number)
-
-    conventions = get_conventions_for_step(step.files, Path(config.cwd))
-    agent_config = make_test_eng_agent(
-        step=step,
-        conventions=conventions,
-        plan_text=plan_text,
-        prior_files=prior_files,
-        explore_context=explore_context,
-    )
-
-    result = await _run_query(
-        prompt=agent_config["prompt"],
-        tools=agent_config["tools"],
-        model=agent_config["model"],
-        cwd=config.cwd,
-    )
-
-    test_files = _extract_file_paths(result.output, pattern=r"test.*\.py")
-
-    logger.info("[RED] Step %d — %d test files written", step.number, len(test_files))
-
-    return RedResult(
-        test_files=test_files,
-        cost_usd=result.cost_usd,
-    )
-
-
-async def run_green(
-    step: PlanStep,
-    plan_text: str,
-    test_files: list[str],
     config: PipelineConfig,
     prior_files: list[str],
     extra_context: str = "",
     explore_context: str = "",
-) -> GreenResult:
-    """Execute the GREEN phase — SDE implements production code.
+    prior_steps: list[PlanStep] | None = None,
+    vault_context: str = "",
+    build_state: str = "",
+) -> ImplementResult:
+    """Execute the IMPLEMENT phase — single agent writes code and tests.
+
+    Snapshots both test and source files before/after to detect all changes.
 
     Args:
         step: The plan step to implement.
         plan_text: Full plan markdown text.
-        test_files: Paths to test files (the spec for this step).
         config: Pipeline configuration.
         prior_files: Files from previously completed steps.
-        extra_context: Optional context (e.g. previous failure output).
+        extra_context: Optional additional context (build state, etc.).
         explore_context: Codebase exploration context from the EXPLORE phase.
+        prior_steps: Completed steps for plan truncation context.
+        vault_context: Context from the vault (prior steps/runs).
+        build_state: Current project file tree snapshot.
 
     Returns:
-        GreenResult with changed file paths and cost.
+        ImplementResult with test files, changed files, and cost.
     """
-    logger.info("[GREEN] Step %d — implementing", step.number)
+    logger.info("[IMPLEMENT] Step %d — writing code and tests", step.number)
 
     conventions = get_conventions_for_step(step.files, Path(config.cwd))
-    agent_config = make_sde_agent(
+    agent_config = make_implement_agent(
         step=step,
         conventions=conventions,
         plan_text=plan_text,
-        test_files=test_files,
         prior_files=prior_files,
         extra_context=extra_context,
         explore_context=explore_context,
+        prior_steps=prior_steps,
+        vault_context=vault_context,
+        build_state=build_state,
     )
+
+    # Snapshot files before IMPLEMENT runs
+    pre_tests = _scan_test_files(config.cwd)
+    pre_source = _scan_source_files(config.cwd)
 
     result = await _run_query(
         prompt=agent_config["prompt"],
@@ -188,72 +177,256 @@ async def run_green(
         cwd=config.cwd,
     )
 
-    changed_files = _extract_file_paths(result.output, pattern=r"\.py")
+    # Detect changes by comparing filesystem before/after
+    post_tests = _scan_test_files(config.cwd)
+    post_source = _scan_source_files(config.cwd)
 
-    logger.info("[GREEN] Step %d — %d files changed", step.number, len(changed_files))
+    new_tests = [f for f in post_tests if f not in pre_tests]
+    changed_source = [f for f in post_source if f not in pre_source]
 
-    return GreenResult(
+    # Filter out test files from changed_source (they belong in test_files)
+    changed_files = [f for f in changed_source if not Path(f).name.startswith("test_")]
+    # Add any test files that ended up in source scan
+    extra_tests = [f for f in changed_source if Path(f).name.startswith("test_") and f not in new_tests]
+    new_tests.extend(extra_tests)
+
+    # Fall back to regex extraction if filesystem scan found nothing
+    if not new_tests and not changed_files:
+        all_paths = _extract_file_paths(result.output, pattern=r"\.py")
+        new_tests = [p for p in all_paths if "test_" in p]
+        changed_files = [p for p in all_paths if "test_" not in p]
+
+    logger.info(
+        "[IMPLEMENT] Step %d — %d test files, %d source files changed",
+        step.number,
+        len(new_tests),
+        len(changed_files),
+    )
+
+    return ImplementResult(
+        test_files=new_tests,
         changed_files=changed_files,
         cost_usd=result.cost_usd,
+        agent_output=result.output,
     )
 
 
-async def run_green_fix(
+async def run_implement_fix(
     step: PlanStep,
     plan_text: str,
-    test_files: list[str],
     failure_output: str,
     config: PipelineConfig,
     prior_files: list[str],
     explore_context: str = "",
-) -> GreenResult:
-    """Execute a GREEN fix — SDE fixes code based on test failures.
+    prior_steps: list[PlanStep] | None = None,
+    vault_context: str = "",
+    build_state: str = "",
+) -> ImplementResult:
+    """Execute an IMPLEMENT fix — fix production code based on failures.
+
+    Like run_implement but with failure context and a constraint to NOT
+    modify test files.
 
     Args:
         step: The plan step being fixed.
         plan_text: Full plan markdown text.
-        test_files: Paths to test files.
-        failure_output: Test failure output to help SDE fix the code.
+        failure_output: Test failure or review output to help fix the code.
         config: Pipeline configuration.
         prior_files: Files from previously completed steps.
         explore_context: Codebase exploration context from the EXPLORE phase.
+        prior_steps: Completed steps for plan truncation context.
+        vault_context: Context from the vault (prior steps/runs).
+        build_state: Current project file tree snapshot.
 
     Returns:
-        GreenResult with changed file paths and cost.
+        ImplementResult with changed files and cost.
     """
-    extra_context = f"""## Test Failures (fix these)
+    extra_context = f"""## Failures (fix these)
 
-The following tests are failing. Fix the production code to make them pass.
-Do NOT modify test files.
+The following failures occurred. Fix the PRODUCTION code to resolve them.
+Do NOT modify test files — only fix production code.
 
 ```
 {failure_output}
 ```"""
 
-    return await run_green(
+    return await run_implement(
         step=step,
         plan_text=plan_text,
-        test_files=test_files,
         config=config,
         prior_files=prior_files,
         extra_context=extra_context,
         explore_context=explore_context,
+        prior_steps=prior_steps,
+        vault_context=vault_context,
+        build_state=build_state,
     )
+
+
+async def run_test_review(
+    diff: str,
+    changed_files: list[str],
+    config: PipelineConfig,
+    step: PlanStep | None = None,
+) -> AgentReviewResult:
+    """Execute test quality review — test-eng reviews test coverage and patterns.
+
+    Args:
+        diff: Git diff for the step's changes.
+        changed_files: List of file paths changed in this step.
+        config: Pipeline configuration.
+        step: The plan step being reviewed (for intent context).
+
+    Returns:
+        AgentReviewResult with findings and severity assessment.
+    """
+    logger.info("[TEST_REVIEW] Test quality review on %d files", len(changed_files))
+
+    conventions = get_conventions_header(Path(config.cwd))
+    agent_config = make_test_reviewer(
+        conventions=conventions,
+        diff=diff,
+        changed_files=changed_files,
+        step=step,
+    )
+
+    result = await _run_query(
+        prompt=agent_config["prompt"],
+        tools=agent_config["tools"],
+        model=agent_config["model"],
+        cwd=config.cwd,
+    )
+
+    findings = _parse_review_findings(result.output)
+    has_critical_or_high = any(f.severity in ("CRITICAL", "HIGH") for f in findings)
+
+    logger.info(
+        "[TEST_REVIEW] %d findings, critical_or_high=%s",
+        len(findings),
+        has_critical_or_high,
+    )
+
+    return AgentReviewResult(
+        findings=findings,
+        has_critical_or_high=has_critical_or_high,
+        cost_usd=result.cost_usd,
+    )
+
+
+async def run_arch_review(
+    diff: str,
+    changed_files: list[str],
+    config: PipelineConfig,
+    step: PlanStep | None = None,
+) -> AgentReviewResult:
+    """Execute architecture review — sys-arch reviews module boundaries and wiring.
+
+    Args:
+        diff: Git diff for the step's changes.
+        changed_files: List of file paths changed in this step.
+        config: Pipeline configuration.
+        step: The plan step being reviewed (for intent context).
+
+    Returns:
+        AgentReviewResult with findings and severity assessment.
+    """
+    logger.info("[ARCH_REVIEW] Architecture review on %d files", len(changed_files))
+
+    conventions = get_conventions_header(Path(config.cwd))
+    agent_config = make_arch_reviewer(
+        conventions=conventions,
+        diff=diff,
+        changed_files=changed_files,
+        step=step,
+    )
+
+    result = await _run_query(
+        prompt=agent_config["prompt"],
+        tools=agent_config["tools"],
+        model=agent_config["model"],
+        cwd=config.cwd,
+    )
+
+    findings = _parse_review_findings(result.output)
+    has_critical_or_high = any(f.severity in ("CRITICAL", "HIGH") for f in findings)
+
+    logger.info(
+        "[ARCH_REVIEW] %d findings, critical_or_high=%s",
+        len(findings),
+        has_critical_or_high,
+    )
+
+    return AgentReviewResult(
+        findings=findings,
+        has_critical_or_high=has_critical_or_high,
+        cost_usd=result.cost_usd,
+    )
+
+
+def _run_lint(changed_files: list[str], cwd: str) -> list[str]:
+    """Run ruff format + check, return remaining violations.
+
+    Auto-fixes what it can, then reports anything unfixable.
+
+    Args:
+        changed_files: List of file paths to lint.
+        cwd: Repository root directory.
+
+    Returns:
+        List of violation strings (empty if clean).
+    """
+    py_files = [
+        f for f in changed_files
+        if f.endswith(".py") and (Path(cwd) / f).is_file()
+    ]
+    if not py_files:
+        return []
+
+    # Auto-fix formatting and lint
+    subprocess.run(["ruff", "format", *py_files], cwd=cwd, capture_output=True, text=True)
+    subprocess.run(["ruff", "check", "--fix", *py_files], cwd=cwd, capture_output=True, text=True)
+
+    # Check for remaining violations
+    violations: list[str] = []
+    format_check = subprocess.run(
+        ["ruff", "format", "--check", *py_files], cwd=cwd, capture_output=True, text=True,
+    )
+    if format_check.returncode != 0:
+        violations.append(f"ruff format: {format_check.stdout.strip()}")
+
+    lint_check = subprocess.run(
+        ["ruff", "check", *py_files], cwd=cwd, capture_output=True, text=True,
+    )
+    if lint_check.returncode != 0:
+        violations.append(f"ruff check: {lint_check.stdout.strip()}")
+
+    return violations
 
 
 def run_verify(
     test_dir: str,
     config: PipelineConfig,
+    changed_files: list[str] | None = None,
 ) -> VerifyResult:
-    """Execute the VERIFY phase — run pytest.
+    """Execute the VERIFY phase — lint then pytest.
+
+    Runs ruff format + check (auto-fixing what it can), then runs
+    the full pytest suite. Lint violations are reported as failures.
 
     Args:
         test_dir: Directory containing the project with tests.
         config: Pipeline configuration.
+        changed_files: Files to lint before running tests.
 
     Returns:
         VerifyResult with pass/fail status and failure details.
     """
+    # --- Lint first ---
+    lint_violations = _run_lint(changed_files or [], config.cwd)
+    if lint_violations:
+        logger.info("[VERIFY] Lint violations found: %d", len(lint_violations))
+
+    # --- Pytest ---
     logger.info("[VERIFY] Running pytest in %s", test_dir)
 
     proc = subprocess.run(
@@ -264,18 +437,37 @@ def run_verify(
         timeout=120,
     )
 
-    passed = proc.returncode == 0
+    test_passed = proc.returncode == 0
     output = proc.stdout + proc.stderr
 
-    # Parse pytest output for counts
     num_tests, num_failures = _parse_pytest_summary(output)
-    failures = _parse_pytest_failures(output) if not passed else []
+
+    # Detect collection errors
+    if not test_passed and num_tests == 0:
+        error_lines = [
+            line for line in output.splitlines()
+            if "ERROR" in line or "ImportError" in line or "ModuleNotFoundError" in line
+        ]
+        failures = error_lines if error_lines else ["Test collection failed — see full output"]
+        failures.append("--- pytest output (last 30 lines) ---")
+        failures.extend(output.splitlines()[-30:])
+        num_failures = max(len(error_lines), 1)
+    else:
+        failures = _parse_pytest_failures(output) if not test_passed else []
+
+    # Combine lint violations into failures
+    if lint_violations:
+        failures = [f"[LINT] {v}" for v in lint_violations] + failures
+        num_failures += len(lint_violations)
+
+    passed = test_passed and not lint_violations
 
     logger.info(
-        "[VERIFY] %s — %d tests, %d failures",
+        "[VERIFY] %s — %d tests, %d failures, %d lint violations",
         "PASSED" if passed else "FAILED",
         num_tests,
         num_failures,
+        len(lint_violations),
     )
 
     return VerifyResult(
@@ -284,81 +476,6 @@ def run_verify(
         num_failures=num_failures,
         failures=failures,
     )
-
-
-def run_lint(
-    changed_files: list[str],
-    config: PipelineConfig,
-) -> LintResult:
-    """Execute the LINT phase — ruff format + ruff check.
-
-    First runs ``ruff format`` to auto-fix formatting, then runs
-    ``ruff check --fix`` to auto-fix lint violations, then checks
-    for any remaining issues.
-
-    Args:
-        changed_files: List of file paths to lint.
-        config: Pipeline configuration.
-
-    Returns:
-        LintResult with pass/fail status and violation details.
-    """
-    logger.info("[LINT] Checking %d files", len(changed_files))
-
-    if not changed_files:
-        return LintResult(passed=True)
-
-    # Filter to Python files that exist
-    py_files = [
-        f for f in changed_files
-        if f.endswith(".py") and (Path(config.cwd) / f).is_file()
-    ]
-
-    if not py_files:
-        return LintResult(passed=True)
-
-    violations: list[str] = []
-
-    # Run ruff format (auto-fix)
-    subprocess.run(
-        ["ruff", "format", *py_files],
-        cwd=config.cwd,
-        capture_output=True,
-        text=True,
-    )
-
-    # Run ruff check --fix (auto-fix lint)
-    subprocess.run(
-        ["ruff", "check", "--fix", *py_files],
-        cwd=config.cwd,
-        capture_output=True,
-        text=True,
-    )
-
-    # Check for remaining violations
-    format_check = subprocess.run(
-        ["ruff", "format", "--check", *py_files],
-        cwd=config.cwd,
-        capture_output=True,
-        text=True,
-    )
-    if format_check.returncode != 0:
-        violations.append(f"ruff format: {format_check.stdout.strip()}")
-
-    lint_check = subprocess.run(
-        ["ruff", "check", *py_files],
-        cwd=config.cwd,
-        capture_output=True,
-        text=True,
-    )
-    if lint_check.returncode != 0:
-        violations.append(f"ruff check: {lint_check.stdout.strip()}")
-
-    passed = len(violations) == 0
-
-    logger.info("[LINT] %s — %d violations", "PASSED" if passed else "FAILED", len(violations))
-
-    return LintResult(passed=passed, violations=violations)
 
 
 async def run_explore(
@@ -408,6 +525,7 @@ async def run_review(
     diff: str,
     changed_files: list[str],
     config: PipelineConfig,
+    step: PlanStep | None = None,
 ) -> AgentReviewResult:
     """Execute per-step LLM convention review.
 
@@ -415,6 +533,7 @@ async def run_review(
         diff: Git diff for the step's changes.
         changed_files: List of file paths changed in this step.
         config: Pipeline configuration.
+        step: The plan step being reviewed (for intent context).
 
     Returns:
         AgentReviewResult with findings and severity assessment.
@@ -426,6 +545,7 @@ async def run_review(
         conventions=conventions,
         diff=diff,
         changed_files=changed_files,
+        step=step,
     )
 
     result = await _run_query(
@@ -645,6 +765,43 @@ def run_quality_gates(
             return False
 
     return True
+
+
+def _scan_test_files(cwd: str) -> set[str]:
+    """Scan for test files on the filesystem.
+
+    Args:
+        cwd: Repository root directory.
+
+    Returns:
+        Set of test file paths relative to cwd.
+    """
+    cwd_path = Path(cwd)
+    return {
+        str(p.relative_to(cwd_path))
+        for p in cwd_path.rglob("test_*.py")
+        if ".venv" not in p.parts and "__pycache__" not in p.parts
+    }
+
+
+def _scan_source_files(cwd: str) -> set[str]:
+    """Scan for all Python and config files on the filesystem.
+
+    Args:
+        cwd: Repository root directory.
+
+    Returns:
+        Set of file paths relative to cwd.
+    """
+    cwd_path = Path(cwd)
+    return {
+        str(p.relative_to(cwd_path))
+        for p in cwd_path.rglob("*")
+        if p.is_file()
+        and ".venv" not in p.parts
+        and "__pycache__" not in p.parts
+        and p.suffix in {".py", ".toml", ".html", ".css", ".js"}
+    }
 
 
 def _extract_file_paths(output: str, pattern: str) -> list[str]:

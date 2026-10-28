@@ -24,7 +24,7 @@ _STEP_HEADER_RE = re.compile(
 )
 
 # Matches bullet-point file paths (lines starting with "- `path`" or "- path")
-_FILE_BULLET_RE = re.compile(r"^\s*[-*]\s+`?([^\s`]+\.(?:py|md|toml|yaml|yml|json|sh))`?")
+_FILE_BULLET_RE = re.compile(r"^\s*[-*]\s+`?([^\s`(]+[^\s`)\s])`?")
 
 # Matches "Test classification: unit" or similar
 _TEST_CLASS_RE = re.compile(r"test\s+classification\s*:\s*(.+)", re.IGNORECASE)
@@ -213,9 +213,14 @@ def _extract_test_classification(body: str) -> str:
     """
     match = _TEST_CLASS_RE.search(body)
     if match:
-        classification = match.group(1).strip().lower()
-        if classification in ("unit", "e2e", "both"):
-            return classification
+        raw = match.group(1).strip().lower()
+        # Take first word only — handles "e2e (build + run + curl test)"
+        first_word = raw.split()[0] if raw else ""
+        # Also handle "unit + e2e" as "both"
+        if "unit" in raw and "e2e" in raw:
+            return "both"
+        if first_word in ("unit", "e2e", "both"):
+            return first_word
     return "unit"
 
 
@@ -237,3 +242,103 @@ def _extract_step_acs(body: str) -> list[str]:
         if ac_match:
             acs.append(ac_match.group(1).strip())
     return acs
+
+
+def _dir_prefix(filepath: str, depth: int = 2) -> str:
+    """Extract the first N path components as a directory prefix.
+
+    Args:
+        filepath: A relative file path string.
+        depth: Number of leading components to use.
+
+    Returns:
+        The prefix string, or the full path if fewer than depth components.
+    """
+    parts = Path(filepath).parts
+    return str(Path(*parts[:depth])) if len(parts) >= depth else filepath
+
+
+def get_parallel_groups(
+    steps: list[PlanStep], max_parallel: int = 4,
+) -> list[list[PlanStep]]:
+    """Group steps into sequential batches of independent parallel work.
+
+    A step creates a dependency barrier if it contains foundation files
+    (__init__.py, models.py, pyproject.toml) or if it has more than one
+    file (aggregator steps that import from multiple modules).
+
+    Groups are capped at ``max_parallel`` to avoid API rate limits.
+
+    Args:
+        steps: Ordered list of plan steps.
+        max_parallel: Maximum steps per parallel group (default 4).
+
+    Returns:
+        Ordered list of groups. Each group is a list of independent steps.
+    """
+    if not steps:
+        return []
+
+    _FOUNDATION_NAMES = {"__init__.py", "models.py", "pyproject.toml"}
+
+    def _is_barrier(step: PlanStep) -> bool:
+        """A step is a barrier if it creates foundation files or aggregates."""
+        files = step.files or []
+        has_foundation = any(Path(f).name in _FOUNDATION_NAMES for f in files)
+        return has_foundation
+
+    groups: list[list[PlanStep]] = []
+    current_group: list[PlanStep] = []
+
+    for step in steps:
+        if _is_barrier(step):
+            if current_group:
+                groups.append(current_group)
+                current_group = []
+            groups.append([step])
+        else:
+            current_group.append(step)
+            if len(current_group) >= max_parallel:
+                groups.append(current_group)
+                current_group = []
+
+    if current_group:
+        groups.append(current_group)
+
+    return groups
+
+
+# Non-Python file extensions that indicate infrastructure/config steps
+_NON_PYTHON_EXTENSIONS = frozenset({
+    ".html", ".css", ".js", ".json", ".yaml", ".yml", ".toml",
+    ".md", ".rst", ".txt", ".cfg", ".ini", ".sh", ".bash",
+    ".dockerfile", ".dockerignore", ".env", ".sql", ".xml",
+    ".csv", ".lock",
+})
+
+
+def _is_python_file(filepath: str) -> bool:
+    """Check whether a file path refers to a Python file.
+
+    Args:
+        filepath: Relative file path string.
+
+    Returns:
+        True if the file has a .py or .pyi extension.
+    """
+    suffix = Path(filepath).suffix.lower()
+    return suffix in (".py", ".pyi")
+
+
+def is_non_python_step(step: PlanStep) -> bool:
+    """Check whether all files in a step are non-Python.
+
+    Args:
+        step: The plan step to check.
+
+    Returns:
+        True if the step has files and none are Python files.
+    """
+    if not step.files:
+        return False
+    return all(not _is_python_file(f) for f in step.files)

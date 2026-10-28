@@ -10,9 +10,9 @@ Research a codebase and design an implementation plan interactively. The user is
 ## Usage
 
 ```
-/plan "Add retry logic with exponential backoff to youtube_upload.py"
-/plan "Refactor the buffer API to support rate limiting"
-/plan "Add a new transcription backend using local Whisper"
+/plan "Add delete task feature to task_tracker"
+/plan "Add due dates and an overdue filter to task_tracker"
+/plan "Persist task_tracker data to SQLite instead of JSON"
 ```
 
 ## Workflow
@@ -75,6 +75,13 @@ Present to the user. The user may:
 
 **Iterate until the user explicitly approves the acceptance criteria.**
 
+**For each acceptance criterion, also draft its verification** — how it will be proven, concretely:
+- **Method** — the test or check that proves it (e.g. unit test, e2e test, manual observation)
+- **Command** — the exact command that runs it (e.g. `uv run --directory ... pytest tests/test_x.py::test_y`)
+- **Expected result** — the observable pass condition (exit 0, specific output, file written, etc.)
+
+This AC → verification mapping is what `/verify` consumes later. A criterion with no concrete verification is not "done" — push back and make it testable.
+
 #### 3b. Implementation Steps
 
 Design numbered implementation steps. For each step:
@@ -110,6 +117,16 @@ Present to the user. The user may:
 - [ ] AC 2
 - [ ] AC 3
 
+## Verification
+
+How each criterion is proven. `/verify` consumes this table.
+
+| AC | Method | Command | Expected result |
+|----|--------|---------|-----------------|
+| AC 1 | unit test | `uv run --directory <dir> pytest tests/test_x.py::test_y` | exit 0, asserts pass |
+| AC 2 | e2e test | `uv run --directory <dir> pytest tests/test_x_e2e.py` | CLI exits 0, file written |
+| AC 3 | manual | `<command>` | `<observable result>` |
+
 ## Step 1 — <Title>
 
 <Description>
@@ -126,7 +143,16 @@ Test classification: unit
 ...
 ```
 
-2. Save exploration reports for future reuse:
+2. **Render the HTML version** to `plans/<slug>-YYYY-MM-DD.html` — a self-contained, offline document (no external CDNs, no network needed to open it). It must include:
+   - The feature title and date
+   - The acceptance criteria
+   - The **Verification** table (AC → Method → Command → Expected result)
+   - The implementation steps
+   - An **inline SVG diagram** (hand-written `<svg>...</svg>`, embedded directly in the HTML — no mermaid, no external scripts) showing the structure the sys-arch agents surfaced: step/data flow for a sequence, or component/boundary layout for a system. Keep it legible — boxes with labels and arrows, a handful of nodes, not a sprawl.
+
+   Use the template at **[templates/plan.html](templates/plan.html)** — read it, then fill in the placeholders. All CSS is inline in the `<head>`; the SVG is authored by hand for this specific plan.
+
+3. Save exploration reports for future reuse:
 ```bash
 uv run --directory agent_tools/dev_cycle python save_explorations.py \
   --feature "<slug>" \
@@ -134,11 +160,13 @@ uv run --directory agent_tools/dev_cycle python save_explorations.py \
   --dimensions <dimensions>
 ```
 
-3. Tell the user:
+4. Tell the user:
 ```
 Plan saved to plans/<slug>-YYYY-MM-DD.md
+HTML version: plans/<slug>-YYYY-MM-DD.html
 
 To execute: /dev-cycle plans/<slug>-YYYY-MM-DD.md
+To verify after execution: /verify plans/<slug>-YYYY-MM-DD.md
 ```
 
 ## Rules
@@ -148,7 +176,9 @@ To execute: /dev-cycle plans/<slug>-YYYY-MM-DD.md
 - Launch sys-arch agents in parallel (single message, multiple Agent tool calls)
 - Present findings and ask for confirmation at every stage
 - Iterate on ACs and steps until the user explicitly approves
+- Give every acceptance criterion a concrete verification (method + command + expected result)
 - Adapt plan detail to task size
+- Render both the markdown plan AND the self-contained HTML version (with an inline-SVG diagram)
 - Save exploration reports for reuse
 
 **DON'T:**

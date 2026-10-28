@@ -1,21 +1,19 @@
 ---
 name: dev-cycle
-description: Execute a plan through the TDD pipeline — EXPLORE, RED/GREEN/VERIFY/LINT/REVIEW per step, then final review. Supports static, agent, or full review modes.
+description: Execute a plan through the pipeline — EXPLORE, then IMPLEMENT→VERIFY→REVIEW→COMMIT per step, then final review. Supports static, agent, or full review modes.
 ---
 
 # Dev Cycle
 
-Execute an implementation plan through the TDD pipeline. Optionally explores the codebase first, then each step goes through RED → GREEN → VERIFY → LINT → [REVIEW] → COMMIT, followed by a final review.
+Execute an implementation plan through the pipeline. Optionally explores the codebase first, then each step goes through IMPLEMENT → VERIFY → [REVIEW] → COMMIT, followed by a final review.
 
 ## Usage
 
 ```
 /dev-cycle plans/foo.md                              # full pipeline
 /dev-cycle plans/foo.md --step 3                     # resume from step 3
-/dev-cycle plans/foo.md --step 3 --green             # just green for step 3
-/dev-cycle plans/foo.md --step 3 --red               # just red for step 3
+/dev-cycle plans/foo.md --step 3 --implement         # just implement for step 3
 /dev-cycle plans/foo.md --step 3 --verify            # just verify for step 3
-/dev-cycle plans/foo.md --step 3 --lint              # just lint for step 3
 /dev-cycle plans/foo.md --step 3 --review            # LLM review for step 3
 /dev-cycle plans/foo.md --step 3 --commit            # just commit for step 3
 /dev-cycle plans/foo.md --explore                    # just explore (codebase research)
@@ -32,9 +30,9 @@ Execute an implementation plan through the TDD pipeline. Optionally explores the
 
 | Mode | Per-step review | Final review | Cost |
 |------|----------------|-------------|------|
-| `static` (default) | lint only | static checks + `/review` CLI | Low |
+| `static` (default) | none | static checks + `/review` CLI | Low |
 | `agent` | LLM convention review | LLM eng-review | Higher |
-| `full` | lint + LLM review | static + LLM eng-review | Highest |
+| `full` | LLM review | static + LLM eng-review | Highest |
 
 ## Workflow
 
@@ -43,7 +41,7 @@ Execute an implementation plan through the TDD pipeline. Optionally explores the
 From `$ARGUMENTS`, extract:
 - **Plan path** — required (first positional arg, or infer from conversation context)
 - **--step N** — optional, resume from step N
-- **--red / --green / --verify / --lint / --review / --commit / --explore / --eng-review / --final-review** — optional, run single phase
+- **--implement / --verify / --review / --commit / --explore / --eng-review / --final-review** — optional, run single phase
 - **--review-mode static|agent|full** — review depth (default: static)
 - **--no-explore** — skip codebase exploration
 - **--max-verify N** — override max verify attempts (default 3)
@@ -69,12 +67,12 @@ uv run --directory agent_tools/dev_cycle python run.py \
 uv run --directory agent_tools/dev_cycle python run_step.py \
   --plan <plan_path> \
   [--step N] \
-  --phase <explore|red|green|verify|lint|review|commit|eng-review|final-review> \
+  --phase <explore|implement|verify|review|commit|eng-review|final-review> \
   [--review-mode static|agent|full] \
   [--context "extra instructions for the agent"]
 ```
 
-Phase flag mapping: `--red` → `red`, `--green` → `green`, `--verify` → `verify`, `--lint` → `lint`, `--review` → `review`, `--commit` → `commit`, `--explore` → `explore` (no `--step` needed), `--eng-review` → `eng-review` (no `--step` needed), `--final-review` → `final-review` (no `--step` needed).
+Phase flag mapping: `--implement` → `implement`, `--verify` → `verify`, `--review` → `review`, `--commit` → `commit`, `--explore` → `explore` (no `--step` needed), `--eng-review` → `eng-review` (no `--step` needed), `--final-review` → `final-review` (no `--step` needed).
 
 ### 3. Present Results
 
@@ -85,23 +83,23 @@ Read the structured JSON output from stdout. Present to the user:
 - PR URL if created
 - Total cost
 
-If running decomposed (single phase), present the phase result and **automatically continue to the next phase in the cycle** unless the user explicitly stops you. The full per-step cycle is: RED → GREEN → VERIFY → LINT → [REVIEW] → COMMIT. Never stop after VERIFY or LINT without committing — every step must complete the full cycle through COMMIT.
+If running decomposed (single phase), present the phase result and **automatically continue to the next phase in the cycle** unless the user explicitly stops you. The full per-step cycle is: IMPLEMENT → VERIFY → [REVIEW] → COMMIT. Never stop after VERIFY without committing — every step must complete the full cycle through COMMIT.
 
 ### 4. Handle Failures
 
 If the pipeline fails:
 - Show which step and phase failed
-- Show the failure details (test output, lint violations, review findings)
+- Show the failure details (test output, review findings)
 - List all steps from the plan with their status so the user can pick where to resume:
   ```
   ## Steps
-  1. Add retry decorator              ✓ done
-  2. Integrate retry into upload       ✗ FAILED (verify — 2 tests failing)
-  3. Add structured logging            - pending
+  1. Add retry decorator              done
+  2. Integrate retry into upload       FAILED (verify — 2 tests failing)
+  3. Add structured logging            pending
 
   Resume from step 2:
   /dev-cycle plans/foo.md --step 2
-  /dev-cycle plans/foo.md --step 2 --green   (skip red, tests already written)
+  /dev-cycle plans/foo.md --step 2 --verify   (skip implement, code already written)
   ```
 
 ## Rules

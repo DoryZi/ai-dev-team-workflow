@@ -1,5 +1,7 @@
 # Orchestration Flow
 
+> **v3 note:** this document describes the v2 pipeline. In v3, one IMPLEMENT phase writes code and tests together, replacing RED and GREEN. Current phases: EXPLORE, then IMPLEMENT → VERIFY → REVIEW → COMMIT per step, then FINAL_REVIEW (see `agent_tools/dev_cycle/state_machine.py`).
+
 How the TDD development pipeline works end-to-end. This document covers the two-skill architecture, state machines, agent roles, and a complete example run.
 
 For binding rules and conventions, see `conventions/workflow-contract.md`.
